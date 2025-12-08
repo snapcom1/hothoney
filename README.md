@@ -1,15 +1,38 @@
-# SIP Honeypot
+# HotHoney - SIP Honeypot
 
-A comprehensive SIP/VoIP honeypot system that captures malicious traffic and generates IP blocklists for Juniper routers.
+A comprehensive SIP/VoIP honeypot system that captures malicious traffic, wastes attacker resources, and generates IP blocklists for Juniper routers.
 
 ## Features
 
+### Core Honeypot
 - **SIP Honeypot**: Fake SIP server that captures REGISTER, INVITE, and other SIP attacks
 - **Provisioning Honeypot**: Emulates Polycom, Yealink, Grandstream, and NetSapiens provisioning endpoints
-- **Auto-blocking**: Automatically blocks IPs after threshold of attacks
-- **Web Dashboard**: Manage blocklist, view logs, export configurations
+- **Credential Capture**: Extracts usernames and passwords from SIP authentication attempts
+- **Auto-blocking**: Automatically blocks IPs after configurable threshold of attacks
+
+### Tarpit & Resource Wasting
+- **Call Tarpitting**: Answers INVITE requests and keeps attackers on the line for 5-20 minutes
+- **Fake Registration Success**: Responds with 200 OK to REGISTER attempts (after capturing credentials)
+- **RTP Fart Sounds**: Sends synthetic fart audio via RTP to answered calls, wasting attacker bandwidth 💨
+- **Random Delays**: Randomized ring duration (5-20 seconds) before answering to appear more realistic
+
+### Threat Intelligence
+- **APIBAN Integration**: Automatically imports known SIP attackers from apiban.org
+- **Auto-sync**: Configurable sync interval to keep blocklist updated
+- **Throttling**: Rate limiting to prevent overwhelming the honeypot
+
+### Web Dashboard
+- **Real-time Logs**: View SIP attacks as they happen with filtering by method type
+- **Active Sessions**: Monitor attackers currently being tarpitted in real-time
+- **Blocklist Management**: Add, remove, import/export blocked IPs
+- **Whitelist Support**: Protect your own IP ranges from blocking
 - **Multi-user**: Role-based access (admin/viewer)
+- **Email Alerts**: SMTP integration for attack notifications
+
+### Export & Integration
 - **Juniper Export**: Generate prefix-lists and firewall filters for Juniper routers
+- **Multiple Formats**: Prefix-list, firewall filter, full config, XML (NETCONF), JSON
+- **Automated Push**: Scripts to push blocklists to routers via SSH
 
 ## Quick Start
 
@@ -200,6 +223,48 @@ set policy-options policy-statement BLOCK-HONEYPOT term 1 then reject
 | ADMIN_USER | admin | Default admin username |
 | ADMIN_PASS | changeme | Default admin password |
 | AUTO_BLOCK_THRESHOLD | 3 | Hits before auto-block |
+
+## Tarpit & RTP Details
+
+### How Tarpitting Works
+
+When an attacker sends an INVITE (call attempt), the honeypot:
+
+1. **Rings** for 5-20 seconds (randomized) with 180 Ringing responses
+2. **Answers** with 200 OK containing a fake SDP
+3. **Holds the call** for 5-20 minutes while sending RTP audio
+4. **Sends fart sounds** via RTP to the attacker's media port 💨
+
+This wastes attacker resources:
+- Keeps their call leg open and tied up
+- Consumes their bandwidth with RTP traffic
+- Makes automated dialers wait instead of moving to next target
+
+### Fake Registration Success
+
+For REGISTER attacks, the honeypot:
+
+1. Sends 401 Unauthorized with a challenge (captures credentials)
+2. Accepts the auth response with 200 OK
+3. Logs the captured username/password for analysis
+
+This makes attackers think they succeeded, encouraging them to:
+- Continue attacking (generating more logs)
+- Attempt calls through the "registered" account
+- Reveal more about their attack patterns
+
+## APIBAN Integration
+
+[APIBAN](https://apiban.org) provides a free, community-driven blocklist of known SIP attackers.
+
+### Setup
+
+1. Get a free API key from https://apiban.org
+2. In the web dashboard, go to Settings → APIBAN
+3. Enter your API key and enable auto-sync
+4. Configure sync interval (default: 5 minutes)
+
+The honeypot will automatically import new blocked IPs and add them to your blocklist.
 
 ## Security Notes
 
