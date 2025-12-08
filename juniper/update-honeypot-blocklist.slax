@@ -1,0 +1,156 @@
+/*
+ * Juniper SRX Op Script: Update Honeypot Blocklist
+ *
+ * This script fetches the blocklist from the honeypot server and updates
+ * the prefix-lists used by firewall filters.
+ *
+ * Installation:
+ *   1. Copy this file to /var/db/scripts/op/ on your SRX
+ *   2. Configure: set system scripts op file update-honeypot-blocklist.slax
+ *   3. Run manually: op update-honeypot-blocklist
+ *   4. Or schedule with event-options (see below)
+ *
+ * To schedule hourly updates:
+ *   set event-options generate-event HONEYPOT-UPDATE time-interval 3600
+ *   set event-options policy UPDATE-HONEYPOT-BLOCKLIST events HONEYPOT-UPDATE
+ *   set event-options policy UPDATE-HONEYPOT-BLOCKLIST then event-script update-honeypot-blocklist.slax
+ *   set system scripts op file update-honeypot-blocklist.slax
+ */
+
+version 1.1;
+
+ns junos = "http://xml.juniper.net/junos/*/junos";
+ns xnm = "http://xml.juniper.net/xnm/1.1/xnm";
+ns jcs = "http://xml.juniper.net/junos/commit-scripts/1.0";
+ns curl extension = "http://xml.libslax.org/curl";
+
+import "../import/junos.xsl";
+
+/* Configuration - Update this URL to match your honeypot server */
+var $FEED_URL = "https://hothoney.snapcom.com/api/public/juniper-feed";
+var $PREFIX_LIST_V4 = "HONEYPOT-BLOCKLIST-V4";
+var $PREFIX_LIST_V6 = "HONEYPOT-BLOCKLIST-V6";
+
+match / {
+    <op-script-results> {
+
+        /* Fetch the blocklist from the honeypot server */
+        var $curl-options = {
+            <url> $FEED_URL;
+            <method> "GET";
+            <insecure>;
+            <timeout> 30;
+        }
+
+        var $response = curl:perform($curl-options);
+
+        if ($response/headers/code != 200) {
+            <output> "ERROR: Failed to fetch blocklist. HTTP code: " _ $response/headers/code;
+            terminate;
+        }
+
+        var $feed-content = $response/raw-data;
+
+        if (not($feed-content)) {
+            <output> "ERROR: Empty response from server";
+            terminate;
+        }
+
+        <output> "Fetched blocklist from " _ $FEED_URL;
+
+        /* Parse the feed - one IP/prefix per line */
+        var $lines = jcs:split("\n", $feed-content);
+
+        var $ipv4-prefixes := {
+            for-each ($lines) {
+                var $line = normalize-space(.);
+                if ($line != "" && not(starts-with($line, "#"))) {
+                    if (not(contains($line, ":"))) {
+                        <prefix> $line;
+                    }
+                }
+            }
+        }
+
+        var $ipv6-prefixes := {
+            for-each ($lines) {
+                var $line = normalize-space(.);
+                if ($line != "" && not(starts-with($line, "#"))) {
+                    if (contains($line, ":")) {
+                        <prefix> $line;
+                    }
+                }
+            }
+        }
+
+        var $v4-count = count($ipv4-prefixes/prefix);
+        var $v6-count = count($ipv6-prefixes/prefix);
+
+        <output> "Found " _ $v4-count _ " IPv4 and " _ $v6-count _ " IPv6 prefixes";
+
+        /* Build the configuration */
+        var $config-changes = {
+            <configuration> {
+                <policy-options> {
+                    /* Delete existing prefix-lists first */
+                    <prefix-list delete="delete"> {
+                        <name> $PREFIX_LIST_V4;
+                    }
+                    <prefix-list delete="delete"> {
+                        <name> $PREFIX_LIST_V6;
+                    }
+
+                    /* Create new IPv4 prefix-list */
+                    <prefix-list> {
+                        <name> $PREFIX_LIST_V4;
+                        for-each ($ipv4-prefixes/prefix) {
+                            <prefix-list-item> {
+                                <name> .;
+                            }
+                        }
+                    }
+
+                    /* Create new IPv6 prefix-list */
+                    <prefix-list> {
+                        <name> $PREFIX_LIST_V6;
+                        for-each ($ipv6-prefixes/prefix) {
+                            <prefix-list-item> {
+                                <name> .;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        /* Lock the configuration */
+        var $lock-result = jcs:invoke("lock-configuration");
+        if ($lock-result//xnm:error) {
+            <output> "ERROR: Unable to lock configuration: " _ $lock-result//xnm:error/message;
+            terminate;
+        }
+
+        /* Load the configuration changes */
+        var $load-result = jcs:invoke("load-configuration", $config-changes);
+        if ($load-result//xnm:error) {
+            <output> "ERROR: Unable to load configuration: " _ $load-result//xnm:error/message;
+            var $unlock = jcs:invoke("unlock-configuration");
+            terminate;
+        }
+
+        /* Commit the changes */
+        var $commit-result = jcs:invoke("commit-configuration");
+        if ($commit-result//xnm:error) {
+            <output> "ERROR: Commit failed: " _ $commit-result//xnm:error/message;
+            var $unlock = jcs:invoke("unlock-configuration");
+            terminate;
+        }
+
+        /* Unlock configuration */
+        var $unlock = jcs:invoke("unlock-configuration");
+
+        <output> "SUCCESS: Updated prefix-lists";
+        <output> "  " _ $PREFIX_LIST_V4 _ ": " _ $v4-count _ " entries";
+        <output> "  " _ $PREFIX_LIST_V6 _ ": " _ $v6-count _ " entries";
+    }
+}

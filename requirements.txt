@@ -1,0 +1,15 @@
+# SIP Honeypot Dependencies
+
+# Async frameworks
+aiohttp>=3.9.0
+aiohttp-cors>=0.7.0
+
+# Database
+aiomysql>=0.2.0
+PyMySQL>=1.1.0
+
+# Utilities
+python-dateutil>=2.8.0
+
+# Optional: For enhanced logging
+colorlog>=6.7.0

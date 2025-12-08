@@ -1,0 +1,517 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SIP Server - Dashboard</title>
+    <link rel="stylesheet" href="/static/css/style.css?v=7">
+</head>
+<body>
+    <div id="app">
+        <!-- Login Page -->
+        <div id="login-page" class="page">
+            <div class="login-container">
+                <h1>SIP Server</h1>
+                <p class="subtitle">Management Console</p>
+                <form id="login-form">
+                    <div class="form-group">
+                        <label for="username">Username</label>
+                        <input type="text" id="username" name="username" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="password">Password</label>
+                        <input type="password" id="password" name="password" required>
+                    </div>
+                    <div id="login-error" class="error-message"></div>
+                    <button type="submit" class="btn btn-primary">Login</button>
+                </form>
+            </div>
+        </div>
+
+        <!-- Main Dashboard -->
+        <div id="dashboard-page" class="page hidden">
+            <nav class="sidebar">
+                <div class="sidebar-header">
+                    <h2>SIP Server</h2>
+                </div>
+                <ul class="nav-menu">
+                    <li><a href="#" data-page="dashboard" class="active">Dashboard</a></li>
+                    <li><a href="#" data-page="blocklist">Blocklist</a></li>
+                    <li><a href="#" data-page="whitelist">Whitelist</a></li>
+                    <li><a href="#" data-page="logs">Logs</a></li>
+                    <li><a href="#" data-page="abuse">Abuse Reports</a></li>
+                    <li><a href="#" data-page="export">Export</a></li>
+                    <li id="settings-nav" class="admin-only"><a href="#" data-page="settings">Settings</a></li>
+                    <li id="users-nav" class="admin-only"><a href="#" data-page="users">Users</a></li>
+                </ul>
+                <div class="sidebar-footer">
+                    <span id="current-user"></span>
+                    <button id="logout-btn" class="btn btn-small">Logout</button>
+                </div>
+            </nav>
+
+            <main class="content">
+                <!-- Dashboard View -->
+                <section id="dashboard-view" class="view">
+                    <h1>Dashboard</h1>
+                    <div class="stats-grid">
+                        <div class="stat-card">
+                            <h3>Total Attacks</h3>
+                            <div class="stat-value" id="stat-total-logs">-</div>
+                        </div>
+                        <div class="stat-card">
+                            <h3>Last 24 Hours</h3>
+                            <div class="stat-value" id="stat-logs-24h">-</div>
+                        </div>
+                        <div class="stat-card">
+                            <h3>Unique IPs</h3>
+                            <div class="stat-value" id="stat-unique-ips">-</div>
+                        </div>
+                        <div class="stat-card">
+                            <h3>Blocked IPs</h3>
+                            <div class="stat-value" id="stat-blocked-ips">-</div>
+                        </div>
+                    </div>
+
+                    <!-- Active Tarpit Sessions -->
+                    <div class="card" id="active-sessions-card">
+                        <h3>Active Tarpit Sessions <span id="active-session-count" class="badge">0</span></h3>
+                        <p class="help-text">Real-time view of attackers being tarpitted (wasting their time/resources) and ripping ass 💨</p>
+                        <table id="active-sessions-table">
+                            <thead>
+                                <tr>
+                                    <th>IP Address</th>
+                                    <th>Target</th>
+                                    <th>Phase</th>
+                                    <th>Progress</th>
+                                    <th>Duration</th>
+                                </tr>
+                            </thead>
+                            <tbody></tbody>
+                        </table>
+                        <p id="no-active-sessions" class="empty-message">No active tarpit sessions</p>
+                        <div class="pagination" id="active-sessions-pagination">
+                            <button id="sessions-prev" class="btn btn-small">&lt; Prev</button>
+                            <span id="sessions-page-info"></span>
+                            <button id="sessions-next" class="btn btn-small">Next &gt;</button>
+                        </div>
+                    </div>
+
+                    <div class="dashboard-grid">
+                        <div class="card">
+                            <h3>Top Attacking IPs</h3>
+                            <table id="top-attackers-table">
+                                <thead>
+                                    <tr><th>IP Address</th><th>Attempts</th><th>Action</th></tr>
+                                </thead>
+                                <tbody></tbody>
+                            </table>
+                        </div>
+                        <div class="card">
+                            <h3>Attack Methods</h3>
+                            <table id="methods-table">
+                                <thead>
+                                    <tr><th>Method</th><th>Count</th></tr>
+                                </thead>
+                                <tbody></tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <!-- Analytics Section -->
+                    <h2 class="section-title">Geographic Analytics</h2>
+                    <div class="toolbar">
+                        <button id="refresh-geo-btn" class="btn btn-primary">Refresh Geo Data</button>
+                        <span id="geo-status" class="status-text"></span>
+                    </div>
+                    <div class="dashboard-grid">
+                        <div class="card">
+                            <h3>Attacks by Country</h3>
+                            <table id="country-table">
+                                <thead>
+                                    <tr><th>Country</th><th>Unique IPs</th><th>Attacks</th></tr>
+                                </thead>
+                                <tbody></tbody>
+                            </table>
+                        </div>
+                        <div class="card">
+                            <h3>Attacks by ASN</h3>
+                            <table id="asn-table">
+                                <thead>
+                                    <tr><th>ASN</th><th>Name</th><th>IPs</th><th>Attacks</th></tr>
+                                </thead>
+                                <tbody></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Blocklist View -->
+                <section id="blocklist-view" class="view hidden">
+                    <h1>Blocked IPs</h1>
+                    <div class="toolbar">
+                        <button id="add-ip-btn" class="btn btn-primary">Add IP</button>
+                        <button id="bulk-add-btn" class="btn">Bulk Import</button>
+                        <select id="blocklist-source-filter">
+                            <option value="">All Sources</option>
+                            <option value="internal">Internal (Honeypot)</option>
+                            <option value="external">External (APIBAN, etc)</option>
+                        </select>
+                        <input type="text" id="blocklist-search" placeholder="Search IPs...">
+                    </div>
+                    <div class="card public-lists">
+                        <h3>Public Blocklists</h3>
+                        <p>These URLs can be used by firewalls and security tools to automatically fetch the blocklist:</p>
+                        <ul class="public-list-urls">
+                            <li><strong>All IPs (JSON):</strong> <a href="/api/public/blocklist" target="_blank">/api/public/blocklist</a></li>
+                            <li><strong>All IPs (Text):</strong> <a href="/api/public/blocklist.txt" target="_blank">/api/public/blocklist.txt</a></li>
+                            <li><strong>IPv4 Only:</strong> <a href="/api/public/blocklist-ipv4.txt" target="_blank">/api/public/blocklist-ipv4.txt</a></li>
+                            <li><strong>IPv6 Only:</strong> <a href="/api/public/blocklist-ipv6.txt" target="_blank">/api/public/blocklist-ipv6.txt</a></li>
+                        </ul>
+                    </div>
+                    <div class="card external-lists admin-only" id="external-blocklists-card">
+                        <h3>External Blocklist Sources</h3>
+                        <p class="help-text">Import IPs from public threat intelligence feeds like APIBAN.</p>
+                        <div id="external-blocklists-container">
+                            <!-- Populated by JavaScript -->
+                        </div>
+                    </div>
+                    <table id="blocklist-table" class="data-table">
+                        <thead>
+                            <tr>
+                                <th>IP Address</th>
+                                <th>Source</th>
+                                <th>Reason</th>
+                                <th>First Seen</th>
+                                <th>Last Seen</th>
+                                <th>Hits</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody></tbody>
+                    </table>
+                    <div class="pagination">
+                        <button id="blocklist-prev" class="btn btn-small">&lt; Previous</button>
+                        <span id="blocklist-page-info"></span>
+                        <button id="blocklist-next" class="btn btn-small">Next &gt;</button>
+                    </div>
+                </section>
+
+                <!-- Whitelist View -->
+                <section id="whitelist-view" class="view hidden">
+                    <h1>Whitelisted IPs</h1>
+                    <div class="toolbar">
+                        <button id="add-whitelist-btn" class="btn btn-primary">Add IP</button>
+                    </div>
+                    <table id="whitelist-table" class="data-table">
+                        <thead>
+                            <tr>
+                                <th>IP Address</th>
+                                <th>Description</th>
+                                <th>Added By</th>
+                                <th>Created</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody></tbody>
+                    </table>
+                </section>
+
+                <!-- Logs View -->
+                <section id="logs-view" class="view hidden">
+                    <h1>Honeypot Logs</h1>
+                    <div class="toolbar">
+                        <input type="text" id="logs-ip-filter" placeholder="Filter by IP...">
+                        <select id="logs-method-filter">
+                            <option value="">All Methods</option>
+                            <option value="REGISTER">REGISTER</option>
+                            <option value="INVITE">INVITE</option>
+                            <option value="OPTIONS">OPTIONS</option>
+                            <option value="CREDENTIAL_CAPTURE">Captured Credentials</option>
+                        </select>
+                        <button id="logs-refresh" class="btn">Refresh</button>
+                    </div>
+                    <table id="logs-table" class="data-table">
+                        <thead>
+                            <tr>
+                                <th>Time</th>
+                                <th>Source IP</th>
+                                <th>Port</th>
+                                <th>Protocol</th>
+                                <th>Method</th>
+                                <th>URI</th>
+                                <th>User Agent</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody></tbody>
+                    </table>
+                    <div class="pagination">
+                        <button id="logs-prev" class="btn btn-small">&lt; Previous</button>
+                        <span id="logs-page-info"></span>
+                        <button id="logs-next" class="btn btn-small">Next &gt;</button>
+                    </div>
+                </section>
+
+                <!-- Export View -->
+                <section id="export-view" class="view hidden">
+                    <h1>Export Blocklist</h1>
+                    <div class="card">
+                        <h3>Juniper Router Export</h3>
+                        <div class="form-group">
+                            <label for="export-format">Export Format</label>
+                            <select id="export-format">
+                                <option value="full">Full Config (Prefix List + Filter)</option>
+                                <option value="prefix-list">Prefix List Only</option>
+                                <option value="filter">Firewall Filter Only</option>
+                                <option value="xml">NETCONF XML</option>
+                                <option value="json">JSON-RPC</option>
+                                <option value="simple">Simple IP List</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="prefix-name">Prefix List Name</label>
+                            <input type="text" id="prefix-name" value="HONEYPOT-BLOCKLIST">
+                        </div>
+                        <div class="form-group">
+                            <label for="filter-name">Filter Name</label>
+                            <input type="text" id="filter-name" value="HONEYPOT-BLOCK">
+                        </div>
+                        <div class="button-group">
+                            <button id="preview-export" class="btn btn-primary">Preview</button>
+                            <button id="download-export" class="btn">Download</button>
+                            <button id="copy-export" class="btn">Copy to Clipboard</button>
+                        </div>
+                        <div class="export-preview">
+                            <pre id="export-output"></pre>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Abuse Reports View -->
+                <section id="abuse-view" class="view hidden">
+                    <h1>Abuse Reports</h1>
+
+                    <div class="card">
+                        <h3>Send Abuse Report</h3>
+                        <p class="help-text">Enter an IP address to look up its abuse contact and send a report.</p>
+                        <div class="abuse-report-form">
+                            <div class="form-row">
+                                <input type="text" id="abuse-ip-input" placeholder="Enter IP address...">
+                                <button id="abuse-check-btn" class="btn">Check Contact</button>
+                            </div>
+                            <div id="abuse-contact-info" class="abuse-contact-info hidden">
+                                <!-- Populated by JS -->
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="card admin-only">
+                        <h3>Blocked Abuse Emails</h3>
+                        <p class="help-text">Emails in this list won't receive abuse reports (e.g., IANA, invalid contacts).</p>
+                        <div class="form-row" style="margin-bottom: 1rem;">
+                            <input type="email" id="block-email-input" placeholder="abuse@example.com">
+                            <input type="text" id="block-email-reason" placeholder="Reason (optional)">
+                            <button id="block-email-btn" class="btn btn-primary">Block Email</button>
+                        </div>
+                        <table id="email-blocklist-table" class="data-table">
+                            <thead>
+                                <tr>
+                                    <th>Email</th>
+                                    <th>Reason</th>
+                                    <th>Added By</th>
+                                    <th>Date</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody></tbody>
+                        </table>
+                    </div>
+
+                    <div class="card">
+                        <h3>Report History</h3>
+                        <table id="abuse-history-table" class="data-table">
+                            <thead>
+                                <tr>
+                                    <th>Date</th>
+                                    <th>IP Address</th>
+                                    <th>Abuse Contact</th>
+                                    <th>Organization</th>
+                                    <th>Attacks</th>
+                                    <th>Status</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody></tbody>
+                        </table>
+                    </div>
+                </section>
+
+                <!-- Settings View (Admin) -->
+                <section id="settings-view" class="view hidden">
+                    <h1>Settings</h1>
+
+                    <div class="card">
+                        <h3>SMTP Configuration</h3>
+                        <p class="help-text">Configure SMTP settings for sending abuse reports to network operators.</p>
+                        <form id="smtp-settings-form">
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label for="smtp_host">SMTP Host</label>
+                                    <input type="text" id="smtp_host" name="smtp_host" placeholder="smtp.example.com">
+                                </div>
+                                <div class="form-group" style="width: 120px;">
+                                    <label for="smtp_port">Port</label>
+                                    <input type="number" id="smtp_port" name="smtp_port" placeholder="587">
+                                </div>
+                            </div>
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label for="smtp_user">SMTP Username</label>
+                                    <input type="text" id="smtp_user" name="smtp_user" placeholder="user@example.com">
+                                </div>
+                                <div class="form-group">
+                                    <label for="smtp_pass">SMTP Password</label>
+                                    <input type="password" id="smtp_pass" name="smtp_pass" placeholder="Leave blank to keep current">
+                                </div>
+                            </div>
+                            <div class="form-group">
+                                <label for="smtp_from">From Email Address</label>
+                                <input type="email" id="smtp_from" name="smtp_from" placeholder="abuse-reports@example.com">
+                            </div>
+                            <div class="form-group">
+                                <label for="abuse_report_from_name">From Name</label>
+                                <input type="text" id="abuse_report_from_name" name="abuse_report_from_name" placeholder="SIP Honeypot">
+                            </div>
+                            <div class="button-group">
+                                <button type="button" id="test-smtp-btn" class="btn">Test Connection</button>
+                                <span id="smtp-test-result" class="test-result"></span>
+                            </div>
+                        </form>
+                    </div>
+
+                    <div class="card">
+                        <h3>Abuse Reporting</h3>
+                        <div class="form-group">
+                            <label for="abuse_report_cooldown_days">Report Cooldown (days)</label>
+                            <input type="number" id="abuse_report_cooldown_days" name="abuse_report_cooldown_days" min="1" max="90" placeholder="7">
+                            <p class="help-text">Minimum days between sending reports for the same IP address.</p>
+                        </div>
+                    </div>
+
+                    <div class="card">
+                        <h3>Honeypot Settings</h3>
+                        <div class="form-group">
+                            <label for="auto_block_threshold">Auto-Block Threshold</label>
+                            <input type="number" id="auto_block_threshold" name="auto_block_threshold" min="1" max="100" placeholder="3">
+                            <p class="help-text">Number of attack attempts before automatically blocking an IP.</p>
+                        </div>
+                        <div class="form-group">
+                            <label for="blocklist_expiry_days">Blocklist Expiry (days)</label>
+                            <input type="number" id="blocklist_expiry_days" name="blocklist_expiry_days" min="1" max="365" placeholder="60">
+                            <p class="help-text">Days before blocked IPs expire and are removed from the blocklist.</p>
+                        </div>
+                    </div>
+
+                    <div class="card">
+                        <h3>SIP Tarpit</h3>
+                        <p class="help-text">Tarpit wastes attacker resources by sending endless 180 Ringing responses to INVITE requests, tying up their scanner.</p>
+                        <div class="form-group checkbox-group">
+                            <label>
+                                <input type="checkbox" id="tarpit_enabled" name="tarpit_enabled">
+                                Enable SIP Tarpit
+                            </label>
+                        </div>
+                        <div class="form-group checkbox-group">
+                            <label>
+                                <input type="checkbox" id="tarpit_blocklist_only" name="tarpit_blocklist_only" checked>
+                                Only tarpit IPs already on blocklist
+                            </label>
+                            <p class="help-text">When enabled, only IPs that are already blocked will be tarpitted. Disable to tarpit all INVITE requests.</p>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="tarpit_delay_ms">Delay between responses (ms)</label>
+                                <input type="number" id="tarpit_delay_ms" name="tarpit_delay_ms" min="1000" max="60000" placeholder="20000">
+                            </div>
+                            <div class="form-group">
+                                <label for="tarpit_ringing_count">Number of ringing responses</label>
+                                <input type="number" id="tarpit_ringing_count" name="tarpit_ringing_count" min="5" max="100" placeholder="30">
+                            </div>
+                        </div>
+                        <p class="help-text">Default: 30 rings at 20s each = 10 min ringing + 5-20 min "call" = up to 30 min wasted per INVITE.</p>
+                    </div>
+
+                    <div class="card">
+                        <h3>Rate Limiting / Throttling</h3>
+                        <p class="help-text">Limit responses and log entries per IP to prevent resource exhaustion from aggressive scanners.</p>
+
+                        <h4>Response Throttling</h4>
+                        <div class="form-group checkbox-group">
+                            <label>
+                                <input type="checkbox" id="throttle_enabled" name="throttle_enabled" checked>
+                                Enable response throttling
+                            </label>
+                            <p class="help-text">Stop responding after an IP exceeds the request limit. They still get logged (subject to log throttling).</p>
+                        </div>
+                        <div class="form-group">
+                            <label for="throttle_requests_per_minute">Max responses per IP per minute</label>
+                            <input type="number" id="throttle_requests_per_minute" name="throttle_requests_per_minute" min="0" max="1000" placeholder="30">
+                            <p class="help-text">Set to 0 for unlimited. Default: 30 responses/minute per IP.</p>
+                        </div>
+
+                        <h4>Log Throttling</h4>
+                        <div class="form-group checkbox-group">
+                            <label>
+                                <input type="checkbox" id="throttle_log_enabled" name="throttle_log_enabled" checked>
+                                Enable log throttling
+                            </label>
+                            <p class="help-text">Limit database writes per IP to prevent log flooding. IPs are still blocked even when logs are throttled.</p>
+                        </div>
+                        <div class="form-group">
+                            <label for="throttle_logs_per_minute">Max log entries per IP per minute</label>
+                            <input type="number" id="throttle_logs_per_minute" name="throttle_logs_per_minute" min="0" max="1000" placeholder="10">
+                            <p class="help-text">Set to 0 for unlimited. Default: 10 log entries/minute per IP.</p>
+                        </div>
+                    </div>
+
+                    <div class="settings-actions">
+                        <button type="button" id="save-settings-btn" class="btn btn-primary">Save Settings</button>
+                        <span id="settings-save-result" class="save-result"></span>
+                    </div>
+                </section>
+
+                <!-- Users View (Admin) -->
+                <section id="users-view" class="view hidden">
+                    <h1>User Management</h1>
+                    <div class="toolbar">
+                        <button id="add-user-btn" class="btn btn-primary">Add User</button>
+                    </div>
+                    <table id="users-table" class="data-table">
+                        <thead>
+                            <tr>
+                                <th>Username</th>
+                                <th>Email</th>
+                                <th>Role</th>
+                                <th>Last Login</th>
+                                <th>Status</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody></tbody>
+                    </table>
+                </section>
+            </main>
+        </div>
+
+        <!-- Modals -->
+        <div id="modal-overlay" class="modal-overlay hidden">
+            <div class="modal" id="modal-content">
+                <!-- Dynamic modal content -->
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/js/app.js?v=15"></script>
+</body>
+</html>

@@ -1,0 +1,86 @@
+version: '3.8'
+
+services:
+  # Apache reverse proxy with HTTPS
+  apache:
+    build: ./apache
+    container_name: sip-honeypot-apache
+    restart: unless-stopped
+    ports:
+      # HTTP - for provisioning honeypot (phones expect port 80)
+      - "80:80"
+      # HTTPS - for web UI
+      - "443:443"
+    environment:
+      - SERVER_NAME=${SERVER_NAME:-localhost}
+    volumes:
+      # Mount SSL certificates (optional - will generate self-signed if not present)
+      - ./apache/ssl:/usr/local/apache2/ssl
+      - apache_logs:/var/log/apache2
+    depends_on:
+      - honeypot
+    networks:
+      - honeypot-net
+
+  honeypot:
+    build: .
+    container_name: sip-honeypot
+    restart: unless-stopped
+    ports:
+      # SIP - needs to be exposed on standard port for attracting attacks
+      - "5060:5060/udp"
+      # TFTP - for VoIP phone provisioning honeypot
+      - "69:69/udp"
+      # Note: HTTP ports are now proxied through Apache
+      # Uncomment below for direct access (debugging)
+      # - "8080:8080"
+      # - "8081:8081"
+    environment:
+      - DB_HOST=mariadb
+      - DB_PORT=3306
+      - DB_USER=honeypot
+      - DB_PASSWORD=${DB_PASSWORD:-honeypot_secure_pass}
+      - DB_NAME=sip_honeypot
+      - ADMIN_USER=${ADMIN_USER:-admin}
+      - ADMIN_PASS=${ADMIN_PASS:-changeme}
+      - AUTO_BLOCK_THRESHOLD=${AUTO_BLOCK_THRESHOLD:-3}
+      - SERVER_NAME=${SERVER_NAME:-SIP Honeypot}
+      # SMTP for abuse reports (optional)
+      - SMTP_HOST=${SMTP_HOST:-}
+      - SMTP_PORT=${SMTP_PORT:-587}
+      - SMTP_USER=${SMTP_USER:-}
+      - SMTP_PASS=${SMTP_PASS:-}
+      - SMTP_FROM=${SMTP_FROM:-}
+      - ABUSE_REPORT_FROM_NAME=${ABUSE_REPORT_FROM_NAME:-SIP Honeypot}
+    depends_on:
+      mariadb:
+        condition: service_healthy
+    networks:
+      - honeypot-net
+
+  mariadb:
+    image: mariadb:10.11
+    container_name: sip-honeypot-db
+    restart: unless-stopped
+    environment:
+      - MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD:-root_secure_pass}
+      - MYSQL_DATABASE=sip_honeypot
+      - MYSQL_USER=honeypot
+      - MYSQL_PASSWORD=${DB_PASSWORD:-honeypot_secure_pass}
+    volumes:
+      - mariadb_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - honeypot-net
+
+volumes:
+  mariadb_data:
+  apache_logs:
+
+networks:
+  honeypot-net:
+    driver: bridge
