@@ -170,8 +170,9 @@ class SIPHoneypotApp:
         """Run the SIP honeypot server"""
         tarpit_config = await self.get_tarpit_config()
         throttle_config = await self.get_throttle_config()
-        # Also load log throttle settings
+        # Also load log throttle settings and credential rate limit settings
         await self.honeypot_logger.reload_throttle_settings()
+        await self.honeypot_logger.reload_credential_ratelimit_settings()
         await run_sip_honeypot(
             host=self.config['sip_host'],
             port=self.config['sip_port'],

@@ -1395,6 +1395,11 @@ class HoneypotDashboard {
             document.getElementById('throttle_log_enabled').checked = settings.throttle_log_enabled !== 'false';
             document.getElementById('throttle_logs_per_minute').value = settings.throttle_logs_per_minute || '10';
 
+            // Credential rate limit settings
+            document.getElementById('credential_ratelimit_enabled').checked = settings.credential_ratelimit_enabled !== 'false';
+            document.getElementById('credential_ratelimit_attempts').value = settings.credential_ratelimit_attempts || '5';
+            document.getElementById('credential_ratelimit_window_seconds').value = settings.credential_ratelimit_window_seconds || '60';
+
             // Show password placeholder if set
             if (settings.smtp_pass === '********') {
                 document.getElementById('smtp_pass').placeholder = 'Password is set (leave blank to keep)';
@@ -1427,7 +1432,11 @@ class HoneypotDashboard {
             throttle_enabled: document.getElementById('throttle_enabled').checked ? 'true' : 'false',
             throttle_requests_per_minute: document.getElementById('throttle_requests_per_minute').value,
             throttle_log_enabled: document.getElementById('throttle_log_enabled').checked ? 'true' : 'false',
-            throttle_logs_per_minute: document.getElementById('throttle_logs_per_minute').value
+            throttle_logs_per_minute: document.getElementById('throttle_logs_per_minute').value,
+            // Credential rate limit settings
+            credential_ratelimit_enabled: document.getElementById('credential_ratelimit_enabled').checked ? 'true' : 'false',
+            credential_ratelimit_attempts: document.getElementById('credential_ratelimit_attempts').value,
+            credential_ratelimit_window_seconds: document.getElementById('credential_ratelimit_window_seconds').value
         };
 
         const resultSpan = document.getElementById('settings-save-result');

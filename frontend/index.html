@@ -505,6 +505,25 @@
                             <input type="number" id="throttle_logs_per_minute" name="throttle_logs_per_minute" min="0" max="1000" placeholder="10">
                             <p class="help-text">Set to 0 for unlimited. Default: 10 log entries/minute per IP.</p>
                         </div>
+
+                        <h4>Credential Brute Force Protection</h4>
+                        <div class="form-group checkbox-group">
+                            <label>
+                                <input type="checkbox" id="credential_ratelimit_enabled" name="credential_ratelimit_enabled" checked>
+                                Enable credential rate limiting
+                            </label>
+                            <p class="help-text">Auto-block IPs that send too many credential attempts in a short time window.</p>
+                        </div>
+                        <div class="form-group">
+                            <label for="credential_ratelimit_attempts">Max credential attempts</label>
+                            <input type="number" id="credential_ratelimit_attempts" name="credential_ratelimit_attempts" min="1" max="100" placeholder="5">
+                            <p class="help-text">Number of credential attempts before auto-blocking. Default: 5 attempts.</p>
+                        </div>
+                        <div class="form-group">
+                            <label for="credential_ratelimit_window_seconds">Time window (seconds)</label>
+                            <input type="number" id="credential_ratelimit_window_seconds" name="credential_ratelimit_window_seconds" min="10" max="3600" placeholder="60">
+                            <p class="help-text">Time window for counting credential attempts. Default: 60 seconds.</p>
+                        </div>
                     </div>
 
                     <div class="settings-actions">

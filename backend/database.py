@@ -399,6 +399,11 @@ class HoneypotLogger:
         self._throttle_enabled = True
         self._throttle_logs_per_minute = 10
         self._throttle_stats: Dict[str, int] = {}  # ip -> dropped count
+        # Credential rate limiting - track credential attempts per IP
+        self._credential_attempts: Dict[str, list] = {}  # ip -> list of timestamps
+        self._credential_ratelimit_enabled = True
+        self._credential_ratelimit_attempts = 5
+        self._credential_ratelimit_window_seconds = 60
 
     async def _get_expiry_days(self) -> int:
         """Get blocklist expiry days from settings"""
@@ -423,6 +428,42 @@ class HoneypotLogger:
                     self._throttle_enabled = row['setting_value'].lower() == 'true'
                 elif row['setting_key'] == 'throttle_logs_per_minute':
                     self._throttle_logs_per_minute = int(row['setting_value'] or 10)
+
+    async def reload_credential_ratelimit_settings(self):
+        """Reload credential rate limit settings from database"""
+        async with self.db.get_cursor() as cursor:
+            await cursor.execute(
+                "SELECT setting_key, setting_value FROM settings WHERE setting_key LIKE 'credential_ratelimit_%'"
+            )
+            results = await cursor.fetchall()
+            for row in results:
+                if row['setting_key'] == 'credential_ratelimit_enabled':
+                    self._credential_ratelimit_enabled = row['setting_value'].lower() == 'true'
+                elif row['setting_key'] == 'credential_ratelimit_attempts':
+                    self._credential_ratelimit_attempts = int(row['setting_value'] or 5)
+                elif row['setting_key'] == 'credential_ratelimit_window_seconds':
+                    self._credential_ratelimit_window_seconds = int(row['setting_value'] or 60)
+
+    def _check_credential_ratelimit(self, ip: str) -> bool:
+        """Check if IP has exceeded credential attempt rate limit. Returns True if should be blocked."""
+        if not self._credential_ratelimit_enabled or self._credential_ratelimit_attempts <= 0:
+            return False
+
+        now = datetime.now()
+        window_start = now - timedelta(seconds=self._credential_ratelimit_window_seconds)
+
+        # Get or create timestamp list for this IP
+        if ip not in self._credential_attempts:
+            self._credential_attempts[ip] = []
+
+        # Clean old timestamps outside the window
+        self._credential_attempts[ip] = [ts for ts in self._credential_attempts[ip] if ts > window_start]
+
+        # Add current attempt
+        self._credential_attempts[ip].append(now)
+
+        # Check if over limit
+        return len(self._credential_attempts[ip]) >= self._credential_ratelimit_attempts
 
     def _should_throttle_log(self, ip: str) -> bool:
         """Check if we should throttle logging for this IP"""
@@ -502,6 +543,19 @@ class HoneypotLogger:
         honeypot_type = event.get('honeypot_type', 'sip')
         protocol = event.get('protocol', 'SIP')
         expiry_days = await self._get_expiry_days()
+        credentials = event.get('credentials', {})
+
+        # Check credential rate limiting - block if too many credential attempts in window
+        if credentials and (credentials.get('username') or credentials.get('auth_user')):
+            if self._check_credential_ratelimit(ip):
+                window_secs = self._credential_ratelimit_window_seconds
+                attempts = self._credential_ratelimit_attempts
+                reason = f"Credential brute force: {attempts} attempts in {window_secs} seconds ({expiry_days} day block)"
+                await self.blocklist.add_ip(ip, reason=reason, auto=True)
+                logger.warning(f"CREDENTIAL RATELIMIT BLOCK - {ip}: {attempts} credential attempts in {window_secs}s")
+                # Send automatic abuse report
+                await self._send_abuse_report(ip)
+                return
 
         # SIP traffic: BLOCK IMMEDIATELY on first attempt
         if protocol == 'SIP' or honeypot_type == 'sip' or method in self.SIP_METHODS:
@@ -785,6 +839,10 @@ class SettingsManager:
         'throttle_logs_per_minute': {'type': 'integer', 'description': 'Max log entries per IP per minute (0=unlimited)', 'sensitive': False, 'default': '10'},
         # Log retention
         'log_max_rows': {'type': 'integer', 'description': 'Maximum log entries to keep (0=unlimited)', 'sensitive': False, 'default': '1000000'},
+        # Credential rate limiting
+        'credential_ratelimit_enabled': {'type': 'boolean', 'description': 'Enable auto-block for credential attempt rate limiting', 'sensitive': False, 'default': 'true'},
+        'credential_ratelimit_attempts': {'type': 'integer', 'description': 'Number of credential attempts before auto-block', 'sensitive': False, 'default': '5'},
+        'credential_ratelimit_window_seconds': {'type': 'integer', 'description': 'Time window in seconds for credential rate limiting', 'sensitive': False, 'default': '60'},
     }
 
     def __init__(self, db: Database):

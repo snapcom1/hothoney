@@ -1138,6 +1138,10 @@ class HoneypotAPI:
             # Reload abuse reporter settings
             await self.abuse_reporter.reload_settings()
 
+            # Reload honeypot logger settings (throttle and credential rate limit)
+            await self.honeypot_logger.reload_throttle_settings()
+            await self.honeypot_logger.reload_credential_ratelimit_settings()
+
             return json_response({
                 'success': True,
                 'results': results,
