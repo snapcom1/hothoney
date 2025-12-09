@@ -7,12 +7,31 @@ Emulates Polycom, Yealink, Grandstream, and NetSapiens provisioning endpoints
 import asyncio
 import logging
 import re
+import random
+import string
 from datetime import datetime
 from aiohttp import web
 import hashlib
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# Fake server domains for provisioning responses
+FAKE_SIP_SERVERS = [
+    'sip1.voip-provider.net',
+    'pbx.cloudcomm.io',
+    'proxy.voiceservices.com',
+    'sip.unified-comms.net',
+    'core.siptrunk.io',
+    'media.voip-connect.com',
+]
+
+FAKE_PROXY_SERVERS = [
+    'proxy1.voip-provider.net',
+    'outbound.cloudcomm.io',
+    'nat.voiceservices.com',
+    'edge.siptrunk.io',
+]
 
 
 class ProvisioningHoneypot:
@@ -23,30 +42,96 @@ class ProvisioningHoneypot:
         self.app = web.Application(middlewares=[self.logging_middleware])
         self._setup_routes()
 
+    def _extract_mac(self, request) -> str:
+        """Extract MAC address from request path"""
+        path = request.path.lower()
+        mac = request.match_info.get('mac', '')
+
+        # Try to find MAC in path if not in match_info
+        if not mac:
+            # Look for 12 hex chars pattern
+            match = re.search(r'([0-9a-f]{12})', path)
+            if match:
+                mac = match.group(1)
+
+        # Clean up MAC - remove colons/dashes and lowercase
+        mac = re.sub(r'[:\-]', '', mac).lower()
+
+        # If still no MAC, generate one based on request
+        if not mac or len(mac) != 12:
+            mac = hashlib.md5(path.encode()).hexdigest()[:12]
+
+        return mac.upper()
+
+    def _format_mac(self, mac: str, separator: str = ':') -> str:
+        """Format MAC address with separator"""
+        mac = mac.upper()
+        return separator.join(mac[i:i+2] for i in range(0, 12, 2))
+
+    def _generate_fake_credentials(self, mac: str) -> dict:
+        """Generate deterministic but realistic-looking fake SIP credentials based on MAC"""
+        # Use MAC to seed so same MAC always gets same creds
+        seed = int(mac, 16) % (2**32)
+        rng = random.Random(seed)
+
+        # Generate extension (3-4 digits)
+        extension = str(rng.randint(100, 9999))
+
+        # Generate password (8-12 chars, alphanumeric)
+        password_chars = string.ascii_letters + string.digits
+        password = ''.join(rng.choice(password_chars) for _ in range(rng.randint(8, 12)))
+
+        # Generate auth user (sometimes different from extension)
+        if rng.random() > 0.5:
+            auth_user = f"{extension}_{mac[-4:]}"
+        else:
+            auth_user = extension
+
+        # Pick servers deterministically
+        sip_server = FAKE_SIP_SERVERS[seed % len(FAKE_SIP_SERVERS)]
+        proxy_server = FAKE_PROXY_SERVERS[seed % len(FAKE_PROXY_SERVERS)]
+
+        # Generate display name
+        names = ['John', 'Jane', 'Mike', 'Sarah', 'David', 'Lisa', 'James', 'Emily', 'Robert', 'Amy']
+        display_name = f"{rng.choice(names)} {extension}"
+
+        return {
+            'extension': extension,
+            'password': password,
+            'auth_user': auth_user,
+            'display_name': display_name,
+            'sip_server': sip_server,
+            'proxy_server': proxy_server,
+            'mac': mac,
+            'mac_formatted': self._format_mac(mac),
+        }
+
     def _setup_routes(self):
         """Setup all fake provisioning endpoints"""
-        # Polycom endpoints
+        # NOTE: More specific routes MUST come before generic catch-all patterns
+
+        # Yealink endpoints (must be before generic /{mac}.cfg)
+        self.app.router.add_get('/y000000000000.cfg', self.yealink_config)
+        self.app.router.add_get('/y{mac}.cfg', self.yealink_config)
+        self.app.router.add_get('/tmp/{mac}.cfg', self.yealink_config)
+        self.app.router.add_get('/Yealink/config/{mac}.cfg', self.yealink_config)
+        self.app.router.add_get('/{mac}.boot', self.yealink_boot)
+
+        # Grandstream endpoints (must be before generic patterns)
+        self.app.router.add_get('/cfg{mac}', self.grandstream_config)
+        self.app.router.add_get('/cfg{mac}.xml', self.grandstream_config)
+        self.app.router.add_get('/gs_config.txt', self.grandstream_config)
+
+        # Polycom endpoints (generic patterns last)
         self.app.router.add_get('/000000000000.cfg', self.polycom_config)
         self.app.router.add_get('/000000000000-phone.cfg', self.polycom_config)
         self.app.router.add_get('/000000000000-web.cfg', self.polycom_config)
-        self.app.router.add_get('/{mac}.cfg', self.polycom_config)
-        self.app.router.add_get('/{mac}-phone.cfg', self.polycom_config)
         self.app.router.add_get('/sip.cfg', self.polycom_sip_cfg)
         self.app.router.add_get('/phone1.cfg', self.polycom_sip_cfg)
         self.app.router.add_get('/Config/reg-basic.cfg', self.polycom_config)
         self.app.router.add_get('/Config/reg-advanced.cfg', self.polycom_config)
-
-        # Yealink endpoints
-        self.app.router.add_get('/y000000000000.cfg', self.yealink_config)
-        self.app.router.add_get('/{mac}.boot', self.yealink_boot)
-        self.app.router.add_get('/y{mac}.cfg', self.yealink_config)
-        self.app.router.add_get('/tmp/{mac}.cfg', self.yealink_config)
-        self.app.router.add_get('/Yealink/config/{mac}.cfg', self.yealink_config)
-
-        # Grandstream endpoints
-        self.app.router.add_get('/cfg{mac}', self.grandstream_config)
-        self.app.router.add_get('/cfg{mac}.xml', self.grandstream_config)
-        self.app.router.add_get('/gs_config.txt', self.grandstream_config)
+        self.app.router.add_get('/{mac}.cfg', self.polycom_config)
+        self.app.router.add_get('/{mac}-phone.cfg', self.polycom_config)
 
         # NetSapiens / NDP endpoints (matching your existing system)
         self.app.router.add_get('/ndp/adminlogin.php', self.netsapiens_admin_login)
@@ -121,71 +206,141 @@ class ProvisioningHoneypot:
             return e
 
     async def polycom_config(self, request):
-        """Fake Polycom configuration file"""
-        mac = request.match_info.get('mac', '000000000000')
+        """Fake Polycom configuration file with realistic fake credentials"""
+        mac = self._extract_mac(request)
+        creds = self._generate_fake_credentials(mac)
+
         config = f"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<!-- Polycom Configuration for {creds['mac_formatted']} -->
 <PHONE_CONFIG>
+<DEVICE_INFO
+    device.set="1"
+    device.prov.serverName="{creds['sip_server']}"
+    device.prov.serverType="FTP"
+/>
 <REGISTRATION
-    reg.1.displayName="Extension 100"
-    reg.1.address="100"
-    reg.1.label="100"
+    reg.1.displayName="{creds['display_name']}"
+    reg.1.address="{creds['extension']}"
+    reg.1.label="{creds['extension']}"
     reg.1.type="private"
-    reg.1.auth.userId="100"
-    reg.1.auth.password="HONEYPOT_TRAP"
-    reg.1.server.1.address="pbx.example.com"
+    reg.1.auth.userId="{creds['auth_user']}"
+    reg.1.auth.password="{creds['password']}"
+    reg.1.server.1.address="{creds['sip_server']}"
     reg.1.server.1.port="5060"
+    reg.1.server.1.transport="UDPOnly"
+    reg.1.server.1.expires="3600"
+    reg.1.server.2.address="{creds['proxy_server']}"
+    reg.1.server.2.port="5060"
 />
 <VOIP_CONFIG
-    voIpProt.server.1.address="pbx.example.com"
+    voIpProt.server.1.address="{creds['sip_server']}"
     voIpProt.server.1.port="5060"
+    voIpProt.SIP.outboundProxy.address="{creds['proxy_server']}"
+    voIpProt.SIP.outboundProxy.port="5060"
+/>
+<CALL_SETTINGS
+    call.autoOffHook.enabled="1"
+    call.autoAnswer.SIP="0"
 />
 </PHONE_CONFIG>
 """
+        logger.info(f"Serving Polycom config for MAC {mac} with ext {creds['extension']}")
         return web.Response(text=config, content_type='text/xml')
 
     async def polycom_sip_cfg(self, request):
         """Fake Polycom SIP config"""
-        config = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+        mac = self._extract_mac(request)
+        creds = self._generate_fake_credentials(mac)
+
+        config = f"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <sip>
-    <outboundProxy voIpProt.SIP.outboundProxy.address="proxy.example.com"/>
-    <server voIpProt.server.1.address="pbx.example.com"/>
+    <outboundProxy voIpProt.SIP.outboundProxy.address="{creds['proxy_server']}"/>
+    <server voIpProt.server.1.address="{creds['sip_server']}"/>
+    <reg reg.1.auth.userId="{creds['auth_user']}" reg.1.auth.password="{creds['password']}"/>
 </sip>
 """
         return web.Response(text=config, content_type='text/xml')
 
     async def yealink_config(self, request):
-        """Fake Yealink configuration file"""
-        config = """#!version:1.0.0.1
+        """Fake Yealink configuration file with realistic fake credentials"""
+        mac = self._extract_mac(request)
+        creds = self._generate_fake_credentials(mac)
+
+        config = f"""#!version:1.0.0.1
+## Yealink Configuration for {creds['mac_formatted']}
+## Generated: {datetime.utcnow().isoformat()}
+
+###### Account Settings ######
 account.1.enable = 1
-account.1.label = Extension 100
-account.1.display_name = Extension 100
-account.1.auth_name = 100
-account.1.user_name = 100
-account.1.password = HONEYPOT_TRAP
-account.1.sip_server.1.address = pbx.example.com
+account.1.label = {creds['extension']}
+account.1.display_name = {creds['display_name']}
+account.1.auth_name = {creds['auth_user']}
+account.1.user_name = {creds['extension']}
+account.1.password = {creds['password']}
+account.1.sip_server.1.address = {creds['sip_server']}
 account.1.sip_server.1.port = 5060
-account.1.outbound_proxy.1.address = proxy.example.com
+account.1.sip_server.1.transport_type = 0
+account.1.sip_server.1.expires = 3600
+account.1.outbound_proxy_enable = 1
+account.1.outbound_proxy.1.address = {creds['proxy_server']}
+account.1.outbound_proxy.1.port = 5060
+
+###### Phone Settings ######
+phone_setting.ring_type = Ring1.wav
+phone_setting.backlight_time = 30
+auto_provision.mode = 6
+auto_provision.server.url = http://{creds['sip_server']}/provision/
+
+###### Network Settings ######
+network.dhcp_enable = 1
+network.vlan.internet_port_enable = 0
 """
+        logger.info(f"Serving Yealink config for MAC {mac} with ext {creds['extension']}")
         return web.Response(text=config, content_type='text/plain')
 
     async def yealink_boot(self, request):
         """Fake Yealink boot file"""
-        return web.Response(text="include:config/<MAC>.cfg", content_type='text/plain')
+        mac = self._extract_mac(request)
+        config = f"""#!version:1.0.0.1
+## Yealink Boot Config
+include:config/{mac.lower()}.cfg
+overwrite_mode = 1
+"""
+        return web.Response(text=config, content_type='text/plain')
 
     async def grandstream_config(self, request):
-        """Fake Grandstream configuration"""
-        # Grandstream uses encoded format, but we'll provide XML for trap
-        config = """<?xml version="1.0" encoding="UTF-8"?>
+        """Fake Grandstream configuration with realistic fake credentials"""
+        mac = self._extract_mac(request)
+        creds = self._generate_fake_credentials(mac)
+
+        # Grandstream uses P-codes for configuration
+        config = f"""<?xml version="1.0" encoding="UTF-8"?>
+<!-- Grandstream Configuration for {creds['mac_formatted']} -->
 <gs_provision version="1">
 <config version="1">
-<P270>100</P270>
-<P271>100</P271>
-<P272>HONEYPOT_TRAP</P272>
-<P47>pbx.example.com</P47>
-<P2312>proxy.example.com</P2312>
+<!-- Account 1 Settings -->
+<P270>{creds['extension']}</P270>
+<P271>{creds['auth_user']}</P271>
+<P272>{creds['password']}</P272>
+<P47>{creds['sip_server']}</P47>
+<P48>5060</P48>
+<P2312>{creds['proxy_server']}</P2312>
+<P2313>5060</P2313>
+<P3>{creds['display_name']}</P3>
+<P35>100</P35>
+<!-- Registration Settings -->
+<P81>1</P81>
+<P82>3600</P82>
+<!-- Audio Settings -->
+<P57>0</P57>
+<P58>2</P58>
+<!-- Provisioning -->
+<P192>http://{creds['sip_server']}/gs/cfg{{MAC}}</P192>
+<P237>1</P237>
 </config>
 </gs_provision>
 """
+        logger.info(f"Serving Grandstream config for MAC {mac} with ext {creds['extension']}")
         return web.Response(text=config, content_type='text/xml')
 
     async def netsapiens_admin_login(self, request):
