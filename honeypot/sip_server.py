@@ -12,7 +12,7 @@ import re
 import socket
 import struct
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional, Tuple, Dict, Callable
 from dataclasses import dataclass
 import hashlib
@@ -679,13 +679,16 @@ Content-Length: {len(sdp_bytes)}\r
 class SIPProtocol(asyncio.DatagramProtocol):
     """Asyncio UDP Protocol for SIP"""
 
-    def __init__(self, honeypot: SIPHoneypot, log_callback=None):
+    def __init__(self, honeypot: SIPHoneypot, log_callback=None, stats_callback=None):
         self.honeypot = honeypot
         self.log_callback = log_callback
+        self.stats_callback = stats_callback
         # Track active tarpit sessions by call-id
         self.tarpit_sessions: Dict[str, asyncio.Task] = {}
         # Track session metadata for display
         self.tarpit_session_info: Dict[str, dict] = {}
+        # Track total time wasted (in seconds)
+        self.total_time_wasted: int = 0
 
     def connection_made(self, transport):
         self.transport = transport
@@ -767,7 +770,7 @@ class SIPProtocol(asyncio.DatagramProtocol):
                 # Log credential capture as separate entry for easy filtering
                 if self.log_callback:
                     cred_entry = {
-                        'timestamp': datetime.now().isoformat(),
+                        'timestamp': datetime.now(timezone.utc).isoformat(),
                         'source_ip': source_ip,
                         'source_port': addr[1],
                         'protocol': 'SIP',
@@ -795,7 +798,7 @@ class SIPProtocol(asyncio.DatagramProtocol):
                 # Log credential capture as separate entry for easy filtering
                 if self.log_callback:
                     cred_entry = {
-                        'timestamp': datetime.now().isoformat(),
+                        'timestamp': datetime.now(timezone.utc).isoformat(),
                         'source_ip': source_ip,
                         'source_port': addr[1],
                         'protocol': 'SIP',
@@ -826,7 +829,7 @@ class SIPProtocol(asyncio.DatagramProtocol):
         target = to_uri.split('@')[0].replace('<sip:', '').replace('sip:', '') if to_uri else 'unknown'
 
         # Initialize session info
-        start_time = datetime.now()
+        start_time = datetime.now(timezone.utc)
         self.tarpit_session_info[call_id] = {
             'ip': source_ip,
             'port': source_port,
@@ -883,7 +886,7 @@ class SIPProtocol(asyncio.DatagramProtocol):
             # Random call duration between 1-3 hours (waste their time!)
             call_duration_min = random.randint(60, 180)
             call_duration_sec = call_duration_min * 60
-            answered_time = datetime.now()
+            answered_time = datetime.now(timezone.utc)
 
             # Parse attacker's SDP to find their RTP address
             rtp_ip, rtp_port = parse_sdp_media_address(msg.body)
@@ -936,6 +939,14 @@ class SIPProtocol(asyncio.DatagramProtocol):
         except Exception as e:
             logger.error(f"Tarpit error for {source_ip}: {e}")
         finally:
+            # Track time wasted before cleanup
+            if call_id in self.tarpit_session_info:
+                time_wasted = self.tarpit_session_info[call_id].get('call_elapsed', 0)
+                self.total_time_wasted += time_wasted
+                # Persist to database
+                if self.stats_callback and time_wasted > 0:
+                    asyncio.create_task(self.stats_callback('time_wasted', time_wasted))
+
             # Clean up session
             if call_id in self.tarpit_sessions:
                 del self.tarpit_sessions[call_id]
@@ -945,7 +956,8 @@ class SIPProtocol(asyncio.DatagramProtocol):
 
 async def run_sip_honeypot(host: str = '0.0.0.0', port: int = 5060, log_callback=None,
                           tarpit_config: Dict = None, is_blocked_callback: Callable = None,
-                          throttle_config: Dict = None, protocol_holder: dict = None):
+                          throttle_config: Dict = None, protocol_holder: dict = None,
+                          stats_callback=None):
     """Run the SIP honeypot server"""
     honeypot = SIPHoneypot(
         host=host,
@@ -957,7 +969,7 @@ async def run_sip_honeypot(host: str = '0.0.0.0', port: int = 5060, log_callback
 
     loop = asyncio.get_event_loop()
     transport, protocol = await loop.create_datagram_endpoint(
-        lambda: SIPProtocol(honeypot, log_callback),
+        lambda: SIPProtocol(honeypot, log_callback, stats_callback),
         local_addr=(host, port)
     )
 

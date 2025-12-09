@@ -153,6 +153,16 @@ class SIPHoneypotApp:
         except asyncio.CancelledError:
             await runner.cleanup()
 
+    async def update_stats(self, stat_name: str, value: int):
+        """Update a stat in the database (increment)"""
+        try:
+            current = await self.settings_manager.get_setting(f'stat_{stat_name}')
+            current_val = int(current) if current else 0
+            new_val = current_val + value
+            await self.settings_manager.set_setting(f'stat_{stat_name}', str(new_val), 'system')
+        except Exception as e:
+            logger.error(f"Failed to update stat {stat_name}: {e}")
+
     async def run_sip_server(self):
         """Run the SIP honeypot server"""
         tarpit_config = await self.get_tarpit_config()
@@ -166,7 +176,8 @@ class SIPHoneypotApp:
             tarpit_config=tarpit_config,
             is_blocked_callback=self.is_ip_blocked,
             throttle_config=throttle_config,
-            protocol_holder=self.sip_protocol_holder
+            protocol_holder=self.sip_protocol_holder,
+            stats_callback=self.update_stats
         )
 
     async def run_http_server(self):

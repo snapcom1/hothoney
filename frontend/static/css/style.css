@@ -238,6 +238,15 @@ textarea:focus {
     color: var(--primary);
 }
 
+.stat-card.highlight {
+    background: linear-gradient(135deg, var(--bg-dark) 0%, #1a2a1a 100%);
+    border-color: var(--success);
+}
+
+.stat-card.highlight .stat-value {
+    color: var(--success);
+}
+
 /* Dashboard Grid */
 .dashboard-grid {
     display: grid;

@@ -6,7 +6,7 @@ REST API for SIP Honeypot Web UI
 import asyncio
 import logging
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 from functools import wraps
 from aiohttp import web
 import aiohttp_cors
@@ -315,6 +315,17 @@ class HoneypotAPI:
     async def get_stats(self, request):
         """Get dashboard statistics"""
         stats = await self.honeypot_logger.get_stats()
+
+        # Add active session time to time_wasted for real-time display
+        protocol = self.sip_protocol_holder.get('protocol')
+        if protocol:
+            active_time = sum(
+                info.get('call_elapsed', 0)
+                for info in protocol.tarpit_session_info.values()
+            )
+            stats['time_wasted'] = stats.get('time_wasted', 0) + active_time
+            stats['active_sessions'] = len(protocol.tarpit_session_info)
+
         return json_response(stats)
 
     @auth_required()
@@ -325,7 +336,15 @@ class HoneypotAPI:
             return json_response({'sessions': [], 'count': 0})
 
         sessions = []
+        now = datetime.now(timezone.utc)
         for call_id, info in protocol.tarpit_session_info.items():
+            # Calculate duration server-side to avoid browser/server clock mismatch
+            try:
+                start_time = datetime.fromisoformat(info['start_time'].replace('Z', '+00:00'))
+                duration_sec = int((now - start_time).total_seconds())
+            except:
+                duration_sec = 0
+
             session = {
                 'call_id': call_id[:16] + '...' if len(call_id) > 16 else call_id,
                 'ip': info['ip'],
@@ -337,7 +356,8 @@ class HoneypotAPI:
                 'start_time': info['start_time'],
                 'answered_time': info['answered_time'],
                 'call_duration_planned': info['call_duration_planned'],
-                'call_elapsed': info['call_elapsed']
+                'call_elapsed': info['call_elapsed'],
+                'duration': duration_sec
             }
             sessions.append(session)
 

@@ -246,6 +246,8 @@ class HoneypotDashboard {
                 this.formatNumber(stats.unique_ips);
             document.getElementById('stat-blocked-ips').textContent =
                 this.formatNumber(stats.blocked_ips);
+            document.getElementById('stat-time-wasted').textContent =
+                this.formatTimeWasted(stats.time_wasted || 0);
 
             // Top attackers
             const attackersTable = document.querySelector('#top-attackers-table tbody');
@@ -350,10 +352,8 @@ class HoneypotDashboard {
                         progressText = `${elapsed}/${planned} min`;
                     }
 
-                    // Calculate duration
-                    const startTime = new Date(session.start_time);
-                    const duration = Math.floor((Date.now() - startTime) / 1000);
-                    const durationStr = this.formatDuration(duration);
+                    // Use server-calculated duration to avoid clock mismatch
+                    const durationStr = this.formatDuration(session.duration || 0);
 
                     return `
                         <tr>
@@ -391,6 +391,19 @@ class HoneypotDashboard {
         const hours = Math.floor(seconds / 3600);
         const mins = Math.floor((seconds % 3600) / 60);
         return `${hours}h ${mins}m`;
+    }
+
+    formatTimeWasted(seconds) {
+        if (seconds < 60) return `${seconds} sec`;
+        if (seconds < 3600) return `${Math.floor(seconds / 60)} min`;
+        if (seconds < 86400) {
+            const hours = Math.floor(seconds / 3600);
+            const mins = Math.floor((seconds % 3600) / 60);
+            return `${hours}h ${mins}m`;
+        }
+        const days = Math.floor(seconds / 86400);
+        const hours = Math.floor((seconds % 86400) / 3600);
+        return `${days}d ${hours}h`;
     }
 
     async loadAnalytics() {

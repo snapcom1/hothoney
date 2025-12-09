@@ -655,6 +655,13 @@ class HoneypotLogger:
             """)
             stats['method_breakdown'] = await cursor.fetchall()
 
+            # Get time wasted stat from settings
+            await cursor.execute("""
+                SELECT setting_value FROM settings WHERE setting_key = 'stat_time_wasted'
+            """)
+            result = await cursor.fetchone()
+            stats['time_wasted'] = int(result['setting_value']) if result else 0
+
             return stats
 
     async def save_ip_geo(self, ip: str, geo_data: Dict):
