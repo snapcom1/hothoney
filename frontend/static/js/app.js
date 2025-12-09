@@ -1015,7 +1015,7 @@ class HoneypotDashboard {
                     <td><span class="ip-address">${this.escapeHtml(log.source_ip)}</span></td>
                     <td>${log.source_port || '-'}</td>
                     <td><span class="badge badge-${this.getProtocolClass(log.honeypot_type)}">${this.escapeHtml(log.honeypot_type || 'unknown').toUpperCase()}</span></td>
-                    <td><span class="badge ${log.method === 'CREDENTIAL_CAPTURE' ? 'badge-warning' : ''}">${this.escapeHtml(log.method)}</span></td>
+                    <td><span class="badge ${log.method === 'CREDENTIAL_CAPTURE' ? 'badge-warning' : log.method === 'CREDENTIALS_SENT' ? 'badge-info' : ''}">${this.escapeHtml(log.method)}</span></td>
                     <td>${destDisplay}</td>
                     <td>${this.truncate(log.uri, 40)}</td>
                     <td>${this.truncate(log.user_agent, 30)}</td>
