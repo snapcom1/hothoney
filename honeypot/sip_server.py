@@ -824,8 +824,8 @@ class SIPProtocol(asyncio.DatagramProtocol):
         source_port = addr[1]
         to_tag = hashlib.md5(f"{call_id}{datetime.now()}".encode()).hexdigest()[:8]
 
-        # Extract target from INVITE
-        to_uri = msg.headers.get('To', '')
+        # Extract target from INVITE (headers are stored lowercase)
+        to_uri = msg.headers.get('to', '')
         target = to_uri.split('@')[0].replace('<sip:', '').replace('sip:', '') if to_uri else 'unknown'
 
         # Initialize session info

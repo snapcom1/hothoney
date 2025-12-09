@@ -273,13 +273,19 @@ class HoneypotDashboard {
         document.getElementById('current-user').textContent = this.user?.username || '';
 
         // Show/hide admin elements
-        if (this.user?.role === 'admin') {
+        const isAdmin = this.user?.role === 'admin';
+        if (isAdmin) {
             document.getElementById('users-nav').classList.remove('hidden');
             document.getElementById('settings-nav').classList.remove('hidden');
         } else {
             document.getElementById('users-nav').classList.add('hidden');
             document.getElementById('settings-nav').classList.add('hidden');
         }
+
+        // Hide all admin-only buttons/elements for non-admins
+        document.querySelectorAll('.admin-only').forEach(el => {
+            el.style.display = isAdmin ? '' : 'none';
+        });
 
         // Navigate to saved page or default to dashboard
         const savedPage = localStorage.getItem('currentPage') || 'dashboard';
@@ -348,13 +354,14 @@ class HoneypotDashboard {
 
             // Top attackers
             const attackersTable = document.querySelector('#top-attackers-table tbody');
+            const isAdmin = this.user?.role === 'admin';
             attackersTable.innerHTML = stats.top_attackers.map(row => `
                 <tr>
                     <td><span class="ip-address">${this.escapeHtml(row.source_ip)}</span></td>
                     <td>${row.count}</td>
                     <td>
-                        <button class="btn btn-small btn-danger action-btn"
-                                onclick="app.blockIP('${row.source_ip}')">Block</button>
+                        ${isAdmin ? `<button class="btn btn-small btn-danger action-btn"
+                                onclick="app.blockIP('${row.source_ip}')">Block</button>` : '-'}
                     </td>
                 </tr>
             `).join('');
@@ -645,6 +652,7 @@ class HoneypotDashboard {
             const data = await this.api(url);
 
             const tbody = document.querySelector('#blocklist-table tbody');
+            const isAdmin = this.user?.role === 'admin';
             tbody.innerHTML = data.ips.map(ip => {
                 const isExternal = ip.added_by === 'apiban';
                 const isInApiban = ip.in_apiban === true;
@@ -667,8 +675,8 @@ class HoneypotDashboard {
                     <td>
                         <button class="btn btn-small action-btn"
                                 onclick="app.showIPDetails('${ip.ip_address}')">Details</button>
-                        <button class="btn btn-small btn-danger action-btn"
-                                onclick="app.unblockIP('${ip.ip_address}')">Remove</button>
+                        ${isAdmin ? `<button class="btn btn-small btn-danger action-btn"
+                                onclick="app.unblockIP('${ip.ip_address}')">Remove</button>` : ''}
                     </td>
                 </tr>
             `}).join('');
@@ -914,6 +922,7 @@ class HoneypotDashboard {
     async loadWhitelist() {
         try {
             const data = await this.api('/whitelist');
+            const isAdmin = this.user?.role === 'admin';
 
             const tbody = document.querySelector('#whitelist-table tbody');
             tbody.innerHTML = data.whitelist.map(entry => `
@@ -923,8 +932,8 @@ class HoneypotDashboard {
                     <td>${this.escapeHtml(entry.added_by || '-')}</td>
                     <td>${this.formatDate(entry.created_at)}</td>
                     <td>
-                        <button class="btn btn-small btn-danger action-btn"
-                                onclick="app.removeWhitelist('${entry.ip_address}')">Remove</button>
+                        ${isAdmin ? `<button class="btn btn-small btn-danger action-btn"
+                                onclick="app.removeWhitelist('${entry.ip_address}')">Remove</button>` : '-'}
                     </td>
                 </tr>
             `).join('') || '<tr><td colspan="5">No whitelisted IPs</td></tr>';
@@ -996,6 +1005,7 @@ class HoneypotDashboard {
             const data = await this.api(url);
 
             const tbody = document.querySelector('#logs-table tbody');
+            const isAdmin = this.user?.role === 'admin';
             tbody.innerHTML = data.logs.map(log => {
                 const dest = this.getDestinationCountry(log.uri, log.headers);
                 const destDisplay = dest.flag ? `${dest.flag} ${dest.name}` : dest.name;
@@ -1012,8 +1022,8 @@ class HoneypotDashboard {
                     <td>
                         <button class="btn btn-small action-btn"
                                 onclick='app.showLogDetails(${JSON.stringify(log)})'>View</button>
-                        <button class="btn btn-small btn-danger action-btn"
-                                onclick="app.blockIP('${log.source_ip}')">Block</button>
+                        ${isAdmin ? `<button class="btn btn-small btn-danger action-btn"
+                                onclick="app.blockIP('${log.source_ip}')">Block</button>` : ''}
                     </td>
                 </tr>
             `}).join('') || '<tr><td colspan="9">No logs found</td></tr>';

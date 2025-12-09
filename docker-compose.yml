@@ -26,6 +26,10 @@ services:
     build: .
     container_name: sip-honeypot
     restart: unless-stopped
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
     ports:
       # SIP - needs to be exposed on standard port for attracting attacks
       - "5060:5060/udp"

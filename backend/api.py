@@ -466,7 +466,7 @@ class HoneypotAPI:
             'offset': offset
         })
 
-    @auth_required()
+    @auth_required(admin_only=True)
     async def add_to_blocklist(self, request):
         """Add IP to blocklist"""
         try:
@@ -492,7 +492,7 @@ class HoneypotAPI:
         else:
             return json_response({'error': 'Failed to add IP (may be whitelisted)'}, status=400)
 
-    @auth_required()
+    @auth_required(admin_only=True)
     async def remove_from_blocklist(self, request):
         """Remove IP from blocklist"""
         ip = request.match_info['ip']
@@ -503,7 +503,7 @@ class HoneypotAPI:
         else:
             return json_response({'error': 'IP not found'}, status=404)
 
-    @auth_required()
+    @auth_required(admin_only=True)
     async def bulk_add_blocklist(self, request):
         """Add multiple IPs to blocklist"""
         try:
@@ -541,7 +541,7 @@ class HoneypotAPI:
 
         return json_response({'whitelist': whitelist})
 
-    @auth_required()
+    @auth_required(admin_only=True)
     async def add_to_whitelist(self, request):
         """Add IP to whitelist"""
         try:
@@ -563,7 +563,7 @@ class HoneypotAPI:
         else:
             return json_response({'error': 'Failed to add IP'}, status=400)
 
-    @auth_required()
+    @auth_required(admin_only=True)
     async def remove_from_whitelist(self, request):
         """Remove IP from whitelist"""
         ip = request.match_info['ip']
@@ -934,7 +934,7 @@ class HoneypotAPI:
             logger.error(f"Refresh geo data error: {e}")
             return json_response({'error': str(e)}, status=500)
 
-    # Abuse Reporting endpoints
+    # Abuse Reporting endpoints (read endpoints available to all, write endpoints admin only)
     @auth_required()
     async def get_abuse_status(self, request):
         """Get abuse reporting configuration status and stats"""
@@ -951,7 +951,7 @@ class HoneypotAPI:
             logger.error(f"Get abuse status error: {e}")
             return json_response({'error': str(e)}, status=500)
 
-    @auth_required()
+    @auth_required(admin_only=True)
     async def check_abuse_contact(self, request):
         """Check abuse contact for an IP without sending report"""
         ip = request.match_info.get('ip', '')
@@ -985,7 +985,7 @@ class HoneypotAPI:
             logger.error(f"Check abuse contact error: {e}")
             return json_response({'error': str(e)}, status=500)
 
-    @auth_required()
+    @auth_required(admin_only=True)
     async def send_abuse_report(self, request):
         """Send abuse report for an IP"""
         ip = request.match_info.get('ip', '')

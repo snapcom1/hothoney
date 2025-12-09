@@ -163,8 +163,8 @@
                 <section id="blocklist-view" class="view hidden">
                     <h1>Blocked IPs</h1>
                     <div class="toolbar">
-                        <button id="add-ip-btn" class="btn btn-primary">Add IP</button>
-                        <button id="bulk-add-btn" class="btn">Bulk Import</button>
+                        <button id="add-ip-btn" class="btn btn-primary admin-only">Add IP</button>
+                        <button id="bulk-add-btn" class="btn admin-only">Bulk Import</button>
                         <select id="blocklist-source-filter">
                             <option value="">All Sources</option>
                             <option value="internal">Internal (Honeypot)</option>
@@ -214,7 +214,7 @@
                 <section id="whitelist-view" class="view hidden">
                     <h1>Whitelisted IPs</h1>
                     <div class="toolbar">
-                        <button id="add-whitelist-btn" class="btn btn-primary">Add IP</button>
+                        <button id="add-whitelist-btn" class="btn btn-primary admin-only">Add IP</button>
                     </div>
                     <table id="whitelist-table" class="data-table">
                         <thead>
@@ -306,7 +306,7 @@
                 <section id="abuse-view" class="view hidden">
                     <h1>Abuse Reports</h1>
 
-                    <div class="card">
+                    <div class="card admin-only">
                         <h3>Send Abuse Report</h3>
                         <p class="help-text">Enter an IP address to look up its abuse contact and send a report.</p>
                         <div class="abuse-report-form">
