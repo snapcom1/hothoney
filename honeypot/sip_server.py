@@ -895,8 +895,8 @@ class SIPProtocol(asyncio.DatagramProtocol):
             answer = self.honeypot.generate_invite_ok_response(msg, addr, to_tag)
             self.transport.sendto(answer, addr)
 
-            # Random call duration between 1-3 hours (waste their time!)
-            call_duration_min = random.randint(60, 180)
+            # Random call duration between 5-20 minutes
+            call_duration_min = random.randint(5, 20)
             call_duration_sec = call_duration_min * 60
             answered_time = datetime.now(timezone.utc)
 
@@ -914,15 +914,10 @@ class SIPProtocol(asyncio.DatagramProtocol):
                     'call_duration_planned': call_duration_sec
                 })
 
-            # Start sending fart sounds if we have their RTP address
+            # RTP fart sending disabled to reduce resource usage
             fart_sender = None
             fart_task = None
-            if rtp_ip and rtp_port:
-                logger.info(f"Tarpit answered call for {source_ip} - sending farts to {rtp_ip}:{rtp_port} for {call_duration_min} min")
-                fart_sender = RTPFartSender(rtp_ip, rtp_port)
-                fart_task = asyncio.create_task(fart_sender.send_farts(call_duration_sec))
-            else:
-                logger.info(f"Tarpit answered call for {source_ip} - fake {call_duration_min} min call (no RTP addr found)")
+            logger.info(f"Tarpit answered call for {source_ip} - fake {call_duration_min} min call")
 
             # Hold the "call" open - they'll keep sending RTP the whole time
             try:
