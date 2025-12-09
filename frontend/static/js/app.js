@@ -11,6 +11,103 @@ class HoneypotDashboard {
         this.logsOffset = 0;
         this.pageSize = 50;
 
+        // Phone country codes mapping (sorted by length desc for matching)
+        this.phoneCountryCodes = [
+            { prefix: '1', code: 'US', name: 'USA/Canada' },
+            { prefix: '7', code: 'RU', name: 'Russia' },
+            { prefix: '20', code: 'EG', name: 'Egypt' },
+            { prefix: '27', code: 'ZA', name: 'South Africa' },
+            { prefix: '30', code: 'GR', name: 'Greece' },
+            { prefix: '31', code: 'NL', name: 'Netherlands' },
+            { prefix: '32', code: 'BE', name: 'Belgium' },
+            { prefix: '33', code: 'FR', name: 'France' },
+            { prefix: '34', code: 'ES', name: 'Spain' },
+            { prefix: '36', code: 'HU', name: 'Hungary' },
+            { prefix: '39', code: 'IT', name: 'Italy' },
+            { prefix: '40', code: 'RO', name: 'Romania' },
+            { prefix: '41', code: 'CH', name: 'Switzerland' },
+            { prefix: '43', code: 'AT', name: 'Austria' },
+            { prefix: '44', code: 'GB', name: 'UK' },
+            { prefix: '45', code: 'DK', name: 'Denmark' },
+            { prefix: '46', code: 'SE', name: 'Sweden' },
+            { prefix: '47', code: 'NO', name: 'Norway' },
+            { prefix: '48', code: 'PL', name: 'Poland' },
+            { prefix: '49', code: 'DE', name: 'Germany' },
+            { prefix: '51', code: 'PE', name: 'Peru' },
+            { prefix: '52', code: 'MX', name: 'Mexico' },
+            { prefix: '53', code: 'CU', name: 'Cuba' },
+            { prefix: '54', code: 'AR', name: 'Argentina' },
+            { prefix: '55', code: 'BR', name: 'Brazil' },
+            { prefix: '56', code: 'CL', name: 'Chile' },
+            { prefix: '57', code: 'CO', name: 'Colombia' },
+            { prefix: '58', code: 'VE', name: 'Venezuela' },
+            { prefix: '60', code: 'MY', name: 'Malaysia' },
+            { prefix: '61', code: 'AU', name: 'Australia' },
+            { prefix: '62', code: 'ID', name: 'Indonesia' },
+            { prefix: '63', code: 'PH', name: 'Philippines' },
+            { prefix: '64', code: 'NZ', name: 'New Zealand' },
+            { prefix: '65', code: 'SG', name: 'Singapore' },
+            { prefix: '66', code: 'TH', name: 'Thailand' },
+            { prefix: '81', code: 'JP', name: 'Japan' },
+            { prefix: '82', code: 'KR', name: 'South Korea' },
+            { prefix: '84', code: 'VN', name: 'Vietnam' },
+            { prefix: '86', code: 'CN', name: 'China' },
+            { prefix: '90', code: 'TR', name: 'Turkey' },
+            { prefix: '91', code: 'IN', name: 'India' },
+            { prefix: '92', code: 'PK', name: 'Pakistan' },
+            { prefix: '93', code: 'AF', name: 'Afghanistan' },
+            { prefix: '94', code: 'LK', name: 'Sri Lanka' },
+            { prefix: '95', code: 'MM', name: 'Myanmar' },
+            { prefix: '98', code: 'IR', name: 'Iran' },
+            { prefix: '212', code: 'MA', name: 'Morocco' },
+            { prefix: '213', code: 'DZ', name: 'Algeria' },
+            { prefix: '216', code: 'TN', name: 'Tunisia' },
+            { prefix: '218', code: 'LY', name: 'Libya' },
+            { prefix: '220', code: 'GM', name: 'Gambia' },
+            { prefix: '221', code: 'SN', name: 'Senegal' },
+            { prefix: '234', code: 'NG', name: 'Nigeria' },
+            { prefix: '254', code: 'KE', name: 'Kenya' },
+            { prefix: '255', code: 'TZ', name: 'Tanzania' },
+            { prefix: '256', code: 'UG', name: 'Uganda' },
+            { prefix: '260', code: 'ZM', name: 'Zambia' },
+            { prefix: '263', code: 'ZW', name: 'Zimbabwe' },
+            { prefix: '351', code: 'PT', name: 'Portugal' },
+            { prefix: '352', code: 'LU', name: 'Luxembourg' },
+            { prefix: '353', code: 'IE', name: 'Ireland' },
+            { prefix: '354', code: 'IS', name: 'Iceland' },
+            { prefix: '358', code: 'FI', name: 'Finland' },
+            { prefix: '370', code: 'LT', name: 'Lithuania' },
+            { prefix: '371', code: 'LV', name: 'Latvia' },
+            { prefix: '372', code: 'EE', name: 'Estonia' },
+            { prefix: '380', code: 'UA', name: 'Ukraine' },
+            { prefix: '381', code: 'RS', name: 'Serbia' },
+            { prefix: '385', code: 'HR', name: 'Croatia' },
+            { prefix: '386', code: 'SI', name: 'Slovenia' },
+            { prefix: '420', code: 'CZ', name: 'Czech Republic' },
+            { prefix: '421', code: 'SK', name: 'Slovakia' },
+            { prefix: '852', code: 'HK', name: 'Hong Kong' },
+            { prefix: '853', code: 'MO', name: 'Macau' },
+            { prefix: '855', code: 'KH', name: 'Cambodia' },
+            { prefix: '856', code: 'LA', name: 'Laos' },
+            { prefix: '880', code: 'BD', name: 'Bangladesh' },
+            { prefix: '886', code: 'TW', name: 'Taiwan' },
+            { prefix: '960', code: 'MV', name: 'Maldives' },
+            { prefix: '961', code: 'LB', name: 'Lebanon' },
+            { prefix: '962', code: 'JO', name: 'Jordan' },
+            { prefix: '963', code: 'SY', name: 'Syria' },
+            { prefix: '964', code: 'IQ', name: 'Iraq' },
+            { prefix: '965', code: 'KW', name: 'Kuwait' },
+            { prefix: '966', code: 'SA', name: 'Saudi Arabia' },
+            { prefix: '967', code: 'YE', name: 'Yemen' },
+            { prefix: '968', code: 'OM', name: 'Oman' },
+            { prefix: '970', code: 'PS', name: 'Palestine' },
+            { prefix: '971', code: 'AE', name: 'UAE' },
+            { prefix: '972', code: 'IL', name: 'Israel' },
+            { prefix: '973', code: 'BH', name: 'Bahrain' },
+            { prefix: '974', code: 'QA', name: 'Qatar' },
+            { prefix: '977', code: 'NP', name: 'Nepal' },
+        ].sort((a, b) => b.prefix.length - a.prefix.length);
+
         this.init();
     }
 
@@ -271,6 +368,9 @@ class HoneypotDashboard {
                 </tr>
             `).join('');
 
+            // Load destination countries
+            await this.loadDestCountries();
+
             // Load analytics
             await this.loadAnalytics();
 
@@ -404,6 +504,58 @@ class HoneypotDashboard {
         const days = Math.floor(seconds / 86400);
         const hours = Math.floor((seconds % 86400) / 3600);
         return `${days}d ${hours}h`;
+    }
+
+    async loadDestCountries() {
+        try {
+            const data = await this.api('/stats/dest-countries');
+            const tbody = document.querySelector('#dest-countries-table tbody');
+
+            if (data.countries && data.countries.length > 0) {
+                tbody.innerHTML = data.countries.map(row => `
+                    <tr>
+                        <td>${this.getCountryFlag(row.code)} ${this.escapeHtml(row.name)}</td>
+                        <td>${row.count}</td>
+                    </tr>
+                `).join('');
+            } else {
+                tbody.innerHTML = '<tr><td colspan="2">No call data yet</td></tr>';
+            }
+        } catch (error) {
+            console.error('Failed to load dest countries:', error);
+        }
+    }
+
+    getDestinationCountry(uri, headers) {
+        // Try to extract phone number from URI or headers
+        let number = '';
+
+        // Parse from URI like sip:+14155551234@domain or sip:14155551234@domain
+        if (uri) {
+            const match = uri.match(/sip:?\+?(\d+)[@\s]/i);
+            if (match) number = match[1];
+        }
+
+        // Also check headers.to if available
+        if (!number && headers) {
+            try {
+                const h = typeof headers === 'string' ? JSON.parse(headers) : headers;
+                const to = h.to || h.To || '';
+                const match = to.match(/sip:?\+?(\d+)[@\s>]/i);
+                if (match) number = match[1];
+            } catch {}
+        }
+
+        if (!number || number.length < 7) return { flag: '', name: '-' };
+
+        // Find matching country code
+        for (const cc of this.phoneCountryCodes) {
+            if (number.startsWith(cc.prefix)) {
+                return { flag: this.getCountryFlag(cc.code), name: cc.name, code: cc.code };
+            }
+        }
+
+        return { flag: '', name: '-' };
     }
 
     async loadAnalytics() {
@@ -844,13 +996,17 @@ class HoneypotDashboard {
             const data = await this.api(url);
 
             const tbody = document.querySelector('#logs-table tbody');
-            tbody.innerHTML = data.logs.map(log => `
+            tbody.innerHTML = data.logs.map(log => {
+                const dest = this.getDestinationCountry(log.uri, log.headers);
+                const destDisplay = dest.flag ? `${dest.flag} ${dest.name}` : dest.name;
+                return `
                 <tr>
                     <td>${this.formatDate(log.timestamp)}</td>
                     <td><span class="ip-address">${this.escapeHtml(log.source_ip)}</span></td>
                     <td>${log.source_port || '-'}</td>
                     <td><span class="badge badge-${this.getProtocolClass(log.honeypot_type)}">${this.escapeHtml(log.honeypot_type || 'unknown').toUpperCase()}</span></td>
                     <td><span class="badge ${log.method === 'CREDENTIAL_CAPTURE' ? 'badge-warning' : ''}">${this.escapeHtml(log.method)}</span></td>
+                    <td>${destDisplay}</td>
                     <td>${this.truncate(log.uri, 40)}</td>
                     <td>${this.truncate(log.user_agent, 30)}</td>
                     <td>
@@ -860,7 +1016,7 @@ class HoneypotDashboard {
                                 onclick="app.blockIP('${log.source_ip}')">Block</button>
                     </td>
                 </tr>
-            `).join('') || '<tr><td colspan="8">No logs found</td></tr>';
+            `}).join('') || '<tr><td colspan="9">No logs found</td></tr>';
 
             document.getElementById('logs-page-info').textContent =
                 `Showing ${data.logs.length} records`;

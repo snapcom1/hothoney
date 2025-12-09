@@ -84,6 +84,7 @@ class HoneypotAPI:
 
         # Dashboard
         self.app.router.add_get('/api/stats', self.get_stats)
+        self.app.router.add_get('/api/stats/dest-countries', self.get_dest_country_stats)
         self.app.router.add_get('/api/active-sessions', self.get_active_sessions)
 
         # Blocklist
@@ -327,6 +328,77 @@ class HoneypotAPI:
             stats['active_sessions'] = len(protocol.tarpit_session_info)
 
         return json_response(stats)
+
+    @auth_required()
+    async def get_dest_country_stats(self, request):
+        """Get destination country statistics from call attempts"""
+        import re
+
+        # Phone country codes (sorted by length desc for matching)
+        phone_codes = [
+            ('1', 'US', 'USA/Canada'), ('7', 'RU', 'Russia'),
+            ('20', 'EG', 'Egypt'), ('27', 'ZA', 'South Africa'),
+            ('30', 'GR', 'Greece'), ('31', 'NL', 'Netherlands'),
+            ('32', 'BE', 'Belgium'), ('33', 'FR', 'France'),
+            ('34', 'ES', 'Spain'), ('36', 'HU', 'Hungary'),
+            ('39', 'IT', 'Italy'), ('40', 'RO', 'Romania'),
+            ('41', 'CH', 'Switzerland'), ('43', 'AT', 'Austria'),
+            ('44', 'GB', 'UK'), ('45', 'DK', 'Denmark'),
+            ('46', 'SE', 'Sweden'), ('47', 'NO', 'Norway'),
+            ('48', 'PL', 'Poland'), ('49', 'DE', 'Germany'),
+            ('51', 'PE', 'Peru'), ('52', 'MX', 'Mexico'),
+            ('53', 'CU', 'Cuba'), ('54', 'AR', 'Argentina'),
+            ('55', 'BR', 'Brazil'), ('56', 'CL', 'Chile'),
+            ('57', 'CO', 'Colombia'), ('58', 'VE', 'Venezuela'),
+            ('60', 'MY', 'Malaysia'), ('61', 'AU', 'Australia'),
+            ('62', 'ID', 'Indonesia'), ('63', 'PH', 'Philippines'),
+            ('64', 'NZ', 'New Zealand'), ('65', 'SG', 'Singapore'),
+            ('66', 'TH', 'Thailand'), ('81', 'JP', 'Japan'),
+            ('82', 'KR', 'South Korea'), ('84', 'VN', 'Vietnam'),
+            ('86', 'CN', 'China'), ('90', 'TR', 'Turkey'),
+            ('91', 'IN', 'India'), ('92', 'PK', 'Pakistan'),
+            ('93', 'AF', 'Afghanistan'), ('94', 'LK', 'Sri Lanka'),
+            ('95', 'MM', 'Myanmar'), ('98', 'IR', 'Iran'),
+            ('212', 'MA', 'Morocco'), ('213', 'DZ', 'Algeria'),
+            ('216', 'TN', 'Tunisia'), ('218', 'LY', 'Libya'),
+            ('234', 'NG', 'Nigeria'), ('254', 'KE', 'Kenya'),
+            ('255', 'TZ', 'Tanzania'), ('256', 'UG', 'Uganda'),
+            ('351', 'PT', 'Portugal'), ('353', 'IE', 'Ireland'),
+            ('358', 'FI', 'Finland'), ('370', 'LT', 'Lithuania'),
+            ('371', 'LV', 'Latvia'), ('372', 'EE', 'Estonia'),
+            ('380', 'UA', 'Ukraine'), ('381', 'RS', 'Serbia'),
+            ('420', 'CZ', 'Czech Republic'), ('421', 'SK', 'Slovakia'),
+            ('852', 'HK', 'Hong Kong'), ('886', 'TW', 'Taiwan'),
+            ('966', 'SA', 'Saudi Arabia'), ('971', 'AE', 'UAE'),
+            ('972', 'IL', 'Israel'), ('974', 'QA', 'Qatar'),
+        ]
+        phone_codes.sort(key=lambda x: len(x[0]), reverse=True)
+
+        # Get recent INVITE logs
+        logs = await self.honeypot_logger.get_logs(limit=1000, method_filter='INVITE')
+
+        country_counts = {}
+        for log in logs:
+            uri = log.get('uri', '')
+            # Extract phone number
+            match = re.search(r'sip:?\+?(\d+)[@\s]', uri, re.I)
+            if match:
+                number = match.group(1)
+                if len(number) >= 7:
+                    for prefix, code, name in phone_codes:
+                        if number.startswith(prefix):
+                            key = (code, name)
+                            country_counts[key] = country_counts.get(key, 0) + 1
+                            break
+
+        # Sort by count and return top 10
+        sorted_countries = sorted(country_counts.items(), key=lambda x: x[1], reverse=True)[:10]
+        result = [
+            {'code': code, 'name': name, 'count': count}
+            for (code, name), count in sorted_countries
+        ]
+
+        return json_response({'countries': result})
 
     @auth_required()
     async def get_active_sessions(self, request):
