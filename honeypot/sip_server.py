@@ -853,7 +853,8 @@ class SIPProtocol(asyncio.DatagramProtocol):
             'start_time': start_time.isoformat(),
             'answered_time': None,
             'call_duration_planned': 0,
-            'call_elapsed': 0
+            'call_elapsed': 0,
+            'total_elapsed': 0  # Total time including ringing
         }
         logger.debug(f"Tarpit session added: {call_id[:16]}... (total active: {len(self.tarpit_session_info)})")
 
@@ -887,6 +888,7 @@ class SIPProtocol(asyncio.DatagramProtocol):
                 # Update session info
                 if call_id in self.tarpit_session_info:
                     self.tarpit_session_info[call_id]['ring_count'] = ring_num
+                    self.tarpit_session_info[call_id]['total_elapsed'] = int(elapsed)
                 logger.debug(f"Tarpit ringing {ring_num} to {source_ip}, {total_ring_duration - elapsed:.1f}s until answer")
                 await asyncio.sleep(ring_interval)
                 elapsed += ring_interval
@@ -918,11 +920,14 @@ class SIPProtocol(asyncio.DatagramProtocol):
                 rtp_ip = source_ip
 
             # Update session info - now in answered/RTP phase
+            # Store ringing duration to add to total
+            ringing_duration = int(total_ring_duration)
             if call_id in self.tarpit_session_info:
                 self.tarpit_session_info[call_id].update({
                     'phase': 'answered',
                     'answered_time': answered_time.isoformat(),
-                    'call_duration_planned': call_duration_sec
+                    'call_duration_planned': call_duration_sec,
+                    'ringing_duration': ringing_duration
                 })
 
             # Check if RTP fart sending is enabled in settings (uses fresh config)
@@ -946,6 +951,8 @@ class SIPProtocol(asyncio.DatagramProtocol):
                     # Update elapsed time in session info
                     if call_id in self.tarpit_session_info:
                         self.tarpit_session_info[call_id]['call_elapsed'] = elapsed
+                        # Total elapsed = ringing time + call time
+                        self.tarpit_session_info[call_id]['total_elapsed'] = ringing_duration + elapsed
             finally:
                 # Stop fart sender
                 if fart_sender:
@@ -964,9 +971,9 @@ class SIPProtocol(asyncio.DatagramProtocol):
         except Exception as e:
             logger.error(f"Tarpit error for {source_ip}: {e}")
         finally:
-            # Track time wasted before cleanup
+            # Track time wasted before cleanup (total includes ringing + call time)
             if call_id in self.tarpit_session_info:
-                time_wasted = self.tarpit_session_info[call_id].get('call_elapsed', 0)
+                time_wasted = self.tarpit_session_info[call_id].get('total_elapsed', 0)
                 self.total_time_wasted += time_wasted
                 # Persist to database
                 if self.stats_callback and time_wasted > 0:

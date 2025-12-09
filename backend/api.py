@@ -321,7 +321,7 @@ class HoneypotAPI:
         protocol = self.sip_protocol_holder.get('protocol')
         if protocol:
             active_time = sum(
-                info.get('call_elapsed', 0)
+                info.get('total_elapsed', 0)
                 for info in protocol.tarpit_session_info.values()
             )
             stats['time_wasted'] = stats.get('time_wasted', 0) + active_time
