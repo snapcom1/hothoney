@@ -443,6 +443,13 @@
                             </label>
                             <p class="help-text">When enabled, only IPs that are already blocked will be tarpitted. Disable to tarpit all INVITE requests.</p>
                         </div>
+                        <div class="form-group checkbox-group">
+                            <label>
+                                <input type="checkbox" id="tarpit_rtp_farts" name="tarpit_rtp_farts">
+                                Send RTP fart sounds to attackers
+                            </label>
+                            <p class="help-text">When enabled, sends hilarious fart sounds via RTP to attackers during the fake call phase.</p>
+                        </div>
                         <div class="form-row">
                             <div class="form-group">
                                 <label for="tarpit_delay_ms">Delay between responses (ms)</label>
@@ -453,7 +460,17 @@
                                 <input type="number" id="tarpit_ringing_count" name="tarpit_ringing_count" min="5" max="100" placeholder="30">
                             </div>
                         </div>
-                        <p class="help-text">Default: 30 rings at 20s each = 10 min ringing + 5-20 min "call" = up to 30 min wasted per INVITE.</p>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="tarpit_call_min_minutes">Min call duration (minutes)</label>
+                                <input type="number" id="tarpit_call_min_minutes" name="tarpit_call_min_minutes" min="1" max="180" placeholder="5">
+                            </div>
+                            <div class="form-group">
+                                <label for="tarpit_call_max_minutes">Max call duration (minutes)</label>
+                                <input type="number" id="tarpit_call_max_minutes" name="tarpit_call_max_minutes" min="1" max="180" placeholder="20">
+                            </div>
+                        </div>
+                        <p class="help-text">After ringing, the call is "answered" and held open for a random duration between min and max.</p>
                     </div>
 
                     <div class="card">

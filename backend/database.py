@@ -776,6 +776,8 @@ class SettingsManager:
         'tarpit_ringing_count': {'type': 'integer', 'description': 'Number of 180 Ringing responses to send', 'sensitive': False, 'default': '30'},
         'tarpit_blocklist_only': {'type': 'boolean', 'description': 'Only tarpit IPs already on blocklist', 'sensitive': False, 'default': 'true'},
         'tarpit_rtp_farts': {'type': 'boolean', 'description': 'Send fart sounds via RTP to attackers during tarpit', 'sensitive': False, 'default': 'false'},
+        'tarpit_call_min_minutes': {'type': 'integer', 'description': 'Minimum fake call duration in minutes', 'sensitive': False, 'default': '5'},
+        'tarpit_call_max_minutes': {'type': 'integer', 'description': 'Maximum fake call duration in minutes', 'sensitive': False, 'default': '20'},
         # Throttling settings
         'throttle_enabled': {'type': 'boolean', 'description': 'Enable response throttling per IP', 'sensitive': False, 'default': 'true'},
         'throttle_requests_per_minute': {'type': 'integer', 'description': 'Max responses per IP per minute (0=unlimited)', 'sensitive': False, 'default': '30'},

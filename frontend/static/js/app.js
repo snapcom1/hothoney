@@ -1383,8 +1383,11 @@ class HoneypotDashboard {
             // Tarpit settings
             document.getElementById('tarpit_enabled').checked = settings.tarpit_enabled === 'true';
             document.getElementById('tarpit_blocklist_only').checked = settings.tarpit_blocklist_only !== 'false';
+            document.getElementById('tarpit_rtp_farts').checked = settings.tarpit_rtp_farts === 'true';
             document.getElementById('tarpit_delay_ms').value = settings.tarpit_delay_ms || '20000';
             document.getElementById('tarpit_ringing_count').value = settings.tarpit_ringing_count || '30';
+            document.getElementById('tarpit_call_min_minutes').value = settings.tarpit_call_min_minutes || '5';
+            document.getElementById('tarpit_call_max_minutes').value = settings.tarpit_call_max_minutes || '20';
 
             // Throttle settings
             document.getElementById('throttle_enabled').checked = settings.throttle_enabled !== 'false';
@@ -1415,8 +1418,11 @@ class HoneypotDashboard {
             // Tarpit settings
             tarpit_enabled: document.getElementById('tarpit_enabled').checked ? 'true' : 'false',
             tarpit_blocklist_only: document.getElementById('tarpit_blocklist_only').checked ? 'true' : 'false',
+            tarpit_rtp_farts: document.getElementById('tarpit_rtp_farts').checked ? 'true' : 'false',
             tarpit_delay_ms: document.getElementById('tarpit_delay_ms').value,
             tarpit_ringing_count: document.getElementById('tarpit_ringing_count').value,
+            tarpit_call_min_minutes: document.getElementById('tarpit_call_min_minutes').value,
+            tarpit_call_max_minutes: document.getElementById('tarpit_call_max_minutes').value,
             // Throttle settings
             throttle_enabled: document.getElementById('throttle_enabled').checked ? 'true' : 'false',
             throttle_requests_per_minute: document.getElementById('throttle_requests_per_minute').value,

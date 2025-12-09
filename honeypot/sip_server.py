@@ -895,8 +895,10 @@ class SIPProtocol(asyncio.DatagramProtocol):
             answer = self.honeypot.generate_invite_ok_response(msg, addr, to_tag)
             self.transport.sendto(answer, addr)
 
-            # Random call duration between 5-20 minutes
-            call_duration_min = random.randint(5, 20)
+            # Random call duration from settings
+            min_minutes = self.honeypot.tarpit_config.get('call_min_minutes', 5)
+            max_minutes = self.honeypot.tarpit_config.get('call_max_minutes', 20)
+            call_duration_min = random.randint(min_minutes, max_minutes)
             call_duration_sec = call_duration_min * 60
             answered_time = datetime.now(timezone.utc)
 

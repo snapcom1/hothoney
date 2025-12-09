@@ -116,7 +116,9 @@ class SIPHoneypotApp:
             'delay_ms': int(settings.get('tarpit_delay_ms', '20000')),
             'ringing_count': int(settings.get('tarpit_ringing_count', '30')),
             'blocklist_only': settings.get('tarpit_blocklist_only', 'true').lower() == 'true',
-            'rtp_farts': settings.get('tarpit_rtp_farts', 'false').lower() == 'true'
+            'rtp_farts': settings.get('tarpit_rtp_farts', 'false').lower() == 'true',
+            'call_min_minutes': int(settings.get('tarpit_call_min_minutes', '5')),
+            'call_max_minutes': int(settings.get('tarpit_call_max_minutes', '20'))
         }
 
     async def get_throttle_config(self) -> dict:
