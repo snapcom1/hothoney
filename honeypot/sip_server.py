@@ -11,6 +11,7 @@ import random
 import re
 import socket
 import struct
+import threading
 import time
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Tuple, Dict, Callable
@@ -38,10 +39,24 @@ class RTPFartSender:
     ULAW_MAX = 0x1FFF
     ULAW_BIAS = 33
 
+    # Shared socket for all RTP senders (reduces file descriptors)
+    _shared_socket = None
+    _socket_lock = threading.Lock()
+
+    @classmethod
+    def get_shared_socket(cls):
+        """Get or create the shared UDP socket"""
+        if cls._shared_socket is None:
+            with cls._socket_lock:
+                if cls._shared_socket is None:
+                    cls._shared_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                    cls._shared_socket.setblocking(False)
+        return cls._shared_socket
+
     def __init__(self, target_ip: str, target_port: int):
         self.target_ip = target_ip
         self.target_port = target_port
-        self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.sock = self.get_shared_socket()  # Use shared socket
         self.sequence = random.randint(0, 65535)
         self.timestamp = random.randint(0, 0xFFFFFFFF)
         self.ssrc = random.randint(0, 0xFFFFFFFF)
@@ -161,12 +176,9 @@ class RTPFartSender:
             self.running = False
 
     def stop(self):
-        """Stop sending RTP"""
+        """Stop sending RTP (don't close shared socket)"""
         self.running = False
-        try:
-            self.sock.close()
-        except Exception:
-            pass
+        # Note: Don't close socket - it's shared across all senders
 
 
 def parse_sdp_media_address(sdp_body: str) -> Tuple[Optional[str], Optional[int]]:
