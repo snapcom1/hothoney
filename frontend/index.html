@@ -4,7 +4,10 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>SIP Server - Dashboard</title>
-    <link rel="stylesheet" href="/static/css/style.css?v=7">
+    <link rel="stylesheet" href="/static/css/style.css?v=8">
+    <!-- Leaflet for attack map -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 </head>
 <body>
     <div id="app">
@@ -75,6 +78,16 @@
                             <h3>Time Wasted 💨</h3>
                             <div class="stat-value" id="stat-time-wasted">-</div>
                         </div>
+                    </div>
+
+                    <!-- Attack Map -->
+                    <div class="card attack-map-card">
+                        <h3>Live Attack Map</h3>
+                        <div class="map-legend">
+                            <span class="legend-item"><span class="legend-dot origin"></span> Attack Origin</span>
+                            <span class="legend-item"><span class="legend-dot destination"></span> Call Destination</span>
+                        </div>
+                        <div id="attack-map"></div>
                     </div>
 
                     <!-- Active Tarpit Sessions -->

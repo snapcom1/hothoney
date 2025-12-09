@@ -238,6 +238,8 @@ class IPLookup:
             'country_code': None,
             'region': None,
             'city': None,
+            'lat': None,
+            'lon': None,
             'isp': None,
             'org': None,
             'asn': None,
@@ -247,8 +249,8 @@ class IPLookup:
 
         try:
             async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10)) as session:
-                # ip-api.com with ASN fields
-                url = f"{IPAPI_URL}{clean_ip}?fields=status,message,country,countryCode,region,regionName,city,isp,org,as,asname"
+                # ip-api.com with ASN and geo fields
+                url = f"{IPAPI_URL}{clean_ip}?fields=status,message,country,countryCode,region,regionName,city,lat,lon,isp,org,as,asname"
                 async with session.get(url) as response:
                     if response.status == 200:
                         data = await response.json()
@@ -257,6 +259,8 @@ class IPLookup:
                             result['country_code'] = data.get('countryCode')
                             result['region'] = data.get('regionName')
                             result['city'] = data.get('city')
+                            result['lat'] = data.get('lat')
+                            result['lon'] = data.get('lon')
                             result['isp'] = data.get('isp')
                             result['org'] = data.get('org')
                             # Parse ASN from "AS12345 Name" format

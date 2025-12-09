@@ -166,6 +166,8 @@ class Database:
                     country_code VARCHAR(10),
                     region VARCHAR(100),
                     city VARCHAR(100),
+                    lat DECIMAL(10, 6),
+                    lon DECIMAL(10, 6),
                     isp VARCHAR(255),
                     org VARCHAR(255),
                     asn VARCHAR(20),
@@ -176,6 +178,16 @@ class Database:
                     INDEX idx_asn (asn)
                 )
             """)
+
+            # Add lat/lon columns if they don't exist (migration for existing databases)
+            try:
+                await cursor.execute("ALTER TABLE ip_geo_cache ADD COLUMN lat DECIMAL(10, 6) AFTER city")
+            except:
+                pass  # Column already exists
+            try:
+                await cursor.execute("ALTER TABLE ip_geo_cache ADD COLUMN lon DECIMAL(10, 6) AFTER lat")
+            except:
+                pass  # Column already exists
 
             # Settings table for configuration
             await cursor.execute("""
@@ -724,13 +736,15 @@ class HoneypotLogger:
             try:
                 await cursor.execute("""
                     INSERT INTO ip_geo_cache
-                    (ip_address, country, country_code, region, city, isp, org, asn, asn_name)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    (ip_address, country, country_code, region, city, lat, lon, isp, org, asn, asn_name)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     ON DUPLICATE KEY UPDATE
                         country = VALUES(country),
                         country_code = VALUES(country_code),
                         region = VALUES(region),
                         city = VALUES(city),
+                        lat = VALUES(lat),
+                        lon = VALUES(lon),
                         isp = VALUES(isp),
                         org = VALUES(org),
                         asn = VALUES(asn),
@@ -742,6 +756,8 @@ class HoneypotLogger:
                     geo_data.get('country_code'),
                     geo_data.get('region'),
                     geo_data.get('city'),
+                    geo_data.get('lat'),
+                    geo_data.get('lon'),
                     geo_data.get('isp'),
                     geo_data.get('org'),
                     geo_data.get('asn'),

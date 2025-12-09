@@ -381,6 +381,9 @@ class HoneypotDashboard {
             // Load analytics
             await this.loadAnalytics();
 
+            // Initialize attack map
+            this.initAttackMap();
+
             // Load active sessions
             await this.loadActiveSessions();
 
@@ -1690,6 +1693,229 @@ class HoneypotDashboard {
             'provisioning': 'http'
         };
         return classes[honeypotType?.toLowerCase()] || 'default';
+    }
+
+    // Attack Map Methods
+    initAttackMap() {
+        if (this.attackMap) {
+            return; // Already initialized
+        }
+
+        const mapContainer = document.getElementById('attack-map');
+        if (!mapContainer) return;
+
+        // Initialize Leaflet map with dark theme
+        this.attackMap = L.map('attack-map', {
+            center: [20, 0],
+            zoom: 2,
+            minZoom: 1,
+            maxZoom: 8,
+            zoomControl: true,
+            attributionControl: true
+        });
+
+        // Add dark tile layer (CartoDB Dark Matter)
+        L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> &copy; <a href="https://carto.com/attributions">CARTO</a>',
+            subdomains: 'abcd',
+            maxZoom: 19
+        }).addTo(this.attackMap);
+
+        // Layer groups for markers and arcs
+        this.originMarkers = L.layerGroup().addTo(this.attackMap);
+        this.destMarkers = L.layerGroup().addTo(this.attackMap);
+        this.attackArcs = L.layerGroup().addTo(this.attackMap);
+
+        // Load initial data
+        this.loadAttackMapData();
+
+        // Auto-refresh every 10 seconds
+        this.attackMapInterval = setInterval(() => {
+            if (document.getElementById('dashboard-view') &&
+                !document.getElementById('dashboard-view').classList.contains('hidden')) {
+                this.loadAttackMapData();
+            }
+        }, 10000);
+    }
+
+    async loadAttackMapData() {
+        if (!this.attackMap) return;
+
+        try {
+            const data = await this.api('/stats/attack-map');
+            this.renderAttackMap(data.attacks || []);
+        } catch (error) {
+            console.error('Failed to load attack map data:', error);
+        }
+    }
+
+    renderAttackMap(attacks) {
+        // Clear existing markers and arcs
+        this.originMarkers.clearLayers();
+        this.destMarkers.clearLayers();
+        this.attackArcs.clearLayers();
+
+        // Track unique origins and destinations
+        const origins = new Map();
+        const destinations = new Map();
+
+        attacks.forEach((attack, index) => {
+            const origin = attack.origin;
+            if (!origin || !origin.lat || !origin.lon) return;
+
+            const originKey = `${origin.lat},${origin.lon}`;
+            if (!origins.has(originKey)) {
+                origins.set(originKey, {
+                    ...origin,
+                    count: 1,
+                    attacks: [attack]
+                });
+            } else {
+                const existing = origins.get(originKey);
+                existing.count++;
+                existing.attacks.push(attack);
+            }
+
+            // Track destinations
+            if (attack.destination) {
+                const dest = attack.destination;
+                const destKey = `${dest.lat},${dest.lon}`;
+                if (!destinations.has(destKey)) {
+                    destinations.set(destKey, {
+                        ...dest,
+                        count: 1
+                    });
+                } else {
+                    destinations.get(destKey).count++;
+                }
+            }
+        });
+
+        // Create origin markers (red, glowing)
+        origins.forEach((origin, key) => {
+            const size = Math.min(8 + origin.count * 2, 20);
+            const marker = L.circleMarker([origin.lat, origin.lon], {
+                radius: size,
+                fillColor: '#ef4444',
+                fillOpacity: 0.8,
+                color: '#ef4444',
+                weight: 2,
+                opacity: 1
+            });
+
+            marker.bindPopup(`
+                <div style="color: #f1f5f9;">
+                    <strong>Attack Origin</strong><br>
+                    ${origin.city || 'Unknown'}, ${origin.country || 'Unknown'}<br>
+                    <small>${origin.count} attack(s)</small>
+                </div>
+            `, { className: 'attack-popup' });
+
+            this.originMarkers.addLayer(marker);
+
+            // Add pulse effect for recent attacks
+            if (origin.count > 0) {
+                const pulse = L.circleMarker([origin.lat, origin.lon], {
+                    radius: size,
+                    fillColor: '#ef4444',
+                    fillOpacity: 0,
+                    color: '#ef4444',
+                    weight: 2,
+                    opacity: 0.5,
+                    className: 'pulse-marker'
+                });
+                this.originMarkers.addLayer(pulse);
+            }
+        });
+
+        // Create destination markers (green)
+        destinations.forEach((dest, key) => {
+            const size = Math.min(6 + dest.count, 14);
+            const marker = L.circleMarker([dest.lat, dest.lon], {
+                radius: size,
+                fillColor: '#22c55e',
+                fillOpacity: 0.8,
+                color: '#22c55e',
+                weight: 2,
+                opacity: 1
+            });
+
+            marker.bindPopup(`
+                <div style="color: #f1f5f9;">
+                    <strong>Call Destination</strong><br>
+                    ${dest.country_code || 'Unknown'}<br>
+                    <small>${dest.count} call attempt(s)</small>
+                </div>
+            `, { className: 'attack-popup' });
+
+            this.destMarkers.addLayer(marker);
+        });
+
+        // Draw animated arcs for attacks with destinations
+        attacks.slice(0, 50).forEach((attack, index) => {
+            if (!attack.destination || !attack.origin) return;
+
+            const origin = attack.origin;
+            const dest = attack.destination;
+
+            // Create curved arc using SVG
+            const arc = this.createArc(
+                [origin.lat, origin.lon],
+                [dest.lat, dest.lon],
+                index
+            );
+            if (arc) {
+                this.attackArcs.addLayer(arc);
+            }
+        });
+    }
+
+    createArc(from, to, index) {
+        // Calculate midpoint with curve offset
+        const midLat = (from[0] + to[0]) / 2;
+        const midLon = (from[1] + to[1]) / 2;
+
+        // Add curvature based on distance
+        const latDiff = Math.abs(to[0] - from[0]);
+        const lonDiff = Math.abs(to[1] - from[1]);
+        const dist = Math.sqrt(latDiff * latDiff + lonDiff * lonDiff);
+        const curveOffset = Math.min(dist * 0.3, 20);
+
+        // Offset perpendicular to the line
+        const angle = Math.atan2(to[0] - from[0], to[1] - from[1]);
+        const offsetLat = midLat + curveOffset * Math.cos(angle + Math.PI/2);
+        const offsetLon = midLon + curveOffset * Math.sin(angle + Math.PI/2);
+
+        // Create quadratic bezier curve points
+        const points = [];
+        for (let t = 0; t <= 1; t += 0.05) {
+            const lat = (1-t)*(1-t)*from[0] + 2*(1-t)*t*offsetLat + t*t*to[0];
+            const lon = (1-t)*(1-t)*from[1] + 2*(1-t)*t*offsetLon + t*t*to[1];
+            points.push([lat, lon]);
+        }
+
+        // Create polyline with gradient effect
+        const opacity = Math.max(0.3, 1 - (index * 0.02));
+        const arc = L.polyline(points, {
+            color: '#f59e0b',
+            weight: 2,
+            opacity: opacity,
+            dashArray: '5, 5',
+            className: 'attack-arc'
+        });
+
+        return arc;
+    }
+
+    destroyAttackMap() {
+        if (this.attackMapInterval) {
+            clearInterval(this.attackMapInterval);
+            this.attackMapInterval = null;
+        }
+        if (this.attackMap) {
+            this.attackMap.remove();
+            this.attackMap = null;
+        }
     }
 
     debounce(fn, delay) {

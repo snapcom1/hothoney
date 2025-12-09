@@ -85,6 +85,7 @@ class HoneypotAPI:
         # Dashboard
         self.app.router.add_get('/api/stats', self.get_stats)
         self.app.router.add_get('/api/stats/dest-countries', self.get_dest_country_stats)
+        self.app.router.add_get('/api/stats/attack-map', self.get_attack_map_data)
         self.app.router.add_get('/api/active-sessions', self.get_active_sessions)
 
         # Blocklist
@@ -399,6 +400,123 @@ class HoneypotAPI:
         ]
 
         return json_response({'countries': result})
+
+    @auth_required()
+    async def get_attack_map_data(self, request):
+        """Get recent attacks with geo data for the attack map"""
+        import re
+
+        # Country coordinates (approximate centers)
+        country_coords = {
+            'US': (39.8283, -98.5795), 'CA': (56.1304, -106.3468), 'MX': (23.6345, -102.5528),
+            'BR': (-14.2350, -51.9253), 'AR': (-38.4161, -63.6167), 'CL': (-35.6751, -71.5430),
+            'GB': (55.3781, -3.4360), 'FR': (46.2276, 2.2137), 'DE': (51.1657, 10.4515),
+            'IT': (41.8719, 12.5674), 'ES': (40.4637, -3.7492), 'PT': (39.3999, -8.2245),
+            'NL': (52.1326, 5.2913), 'BE': (50.5039, 4.4699), 'CH': (46.8182, 8.2275),
+            'AT': (47.5162, 14.5501), 'PL': (51.9194, 19.1451), 'CZ': (49.8175, 15.4730),
+            'SE': (60.1282, 18.6435), 'NO': (60.4720, 8.4689), 'DK': (56.2639, 9.5018),
+            'FI': (61.9241, 25.7482), 'RU': (61.5240, 105.3188), 'UA': (48.3794, 31.1656),
+            'CN': (35.8617, 104.1954), 'JP': (36.2048, 138.2529), 'KR': (35.9078, 127.7669),
+            'IN': (20.5937, 78.9629), 'AU': (-25.2744, 133.7751), 'NZ': (-40.9006, 174.8860),
+            'ZA': (-30.5595, 22.9375), 'EG': (26.8206, 30.8025), 'NG': (9.0820, 8.6753),
+            'AE': (23.4241, 53.8478), 'SA': (23.8859, 45.0792), 'IL': (31.0461, 34.8516),
+            'TR': (38.9637, 35.2433), 'GR': (39.0742, 21.8243), 'RO': (45.9432, 24.9668),
+            'HU': (47.1625, 19.5033), 'SK': (48.6690, 19.6990), 'BG': (42.7339, 25.4858),
+            'RS': (44.0165, 21.0059), 'HR': (45.1000, 15.2000), 'SI': (46.1512, 14.9955),
+            'LT': (55.1694, 23.8813), 'LV': (56.8796, 24.6032), 'EE': (58.5953, 25.0136),
+            'IE': (53.1424, -7.6921), 'SG': (1.3521, 103.8198), 'HK': (22.3193, 114.1694),
+            'TW': (23.6978, 120.9605), 'TH': (15.8700, 100.9925), 'VN': (14.0583, 108.2772),
+            'MY': (4.2105, 101.9758), 'ID': (-0.7893, 113.9213), 'PH': (12.8797, 121.7740),
+            'PK': (30.3753, 69.3451), 'BD': (23.6850, 90.3563), 'IR': (32.4279, 53.6880),
+            'IQ': (33.2232, 43.6793), 'AF': (33.9391, 67.7100), 'VE': (6.4238, -66.5897),
+            'CO': (4.5709, -74.2973), 'PE': (9.1900, -75.0152), 'EC': (-1.8312, -78.1834),
+            'CU': (21.5218, -77.7812), 'DO': (18.7357, -70.1627), 'HN': (15.2, -86.2419),
+            'GT': (15.7835, -90.2308), 'PA': (8.5380, -80.7821), 'CR': (9.7489, -83.7534),
+            'MA': (31.7917, -7.0926), 'DZ': (28.0339, 1.6596), 'TN': (33.8869, 9.5375),
+            'LY': (26.3351, 17.2283), 'KE': (-0.0236, 37.9062), 'TZ': (-6.3690, 34.8888),
+            'UG': (1.3733, 32.2903), 'GH': (7.9465, -1.0232), 'CM': (7.3697, 12.3547),
+            'CI': (7.5400, -5.5471), 'SN': (14.4974, -14.4524), 'QA': (25.3548, 51.1839),
+            'KW': (29.3117, 47.4818), 'BH': (26.0667, 50.5577), 'OM': (21.4735, 55.9754),
+            'LB': (33.8547, 35.8623), 'JO': (30.5852, 36.2384), 'SY': (34.8021, 38.9968),
+        }
+
+        # Phone country codes for destination mapping
+        phone_codes = {
+            '1': 'US', '7': 'RU', '20': 'EG', '27': 'ZA', '30': 'GR', '31': 'NL',
+            '32': 'BE', '33': 'FR', '34': 'ES', '36': 'HU', '39': 'IT', '40': 'RO',
+            '41': 'CH', '43': 'AT', '44': 'GB', '45': 'DK', '46': 'SE', '47': 'NO',
+            '48': 'PL', '49': 'DE', '51': 'PE', '52': 'MX', '53': 'CU', '54': 'AR',
+            '55': 'BR', '56': 'CL', '57': 'CO', '58': 'VE', '60': 'MY', '61': 'AU',
+            '62': 'ID', '63': 'PH', '64': 'NZ', '65': 'SG', '66': 'TH', '81': 'JP',
+            '82': 'KR', '84': 'VN', '86': 'CN', '90': 'TR', '91': 'IN', '92': 'PK',
+            '93': 'AF', '94': 'LK', '95': 'MM', '98': 'IR', '212': 'MA', '213': 'DZ',
+            '216': 'TN', '218': 'LY', '234': 'NG', '254': 'KE', '255': 'TZ', '256': 'UG',
+            '351': 'PT', '353': 'IE', '358': 'FI', '370': 'LT', '371': 'LV', '372': 'EE',
+            '380': 'UA', '381': 'RS', '420': 'CZ', '421': 'SK', '852': 'HK', '886': 'TW',
+            '966': 'SA', '971': 'AE', '972': 'IL', '974': 'QA',
+        }
+        # Sort by length for matching
+        sorted_prefixes = sorted(phone_codes.keys(), key=len, reverse=True)
+
+        # Get recent logs with geo data
+        async with self.db.get_cursor() as cursor:
+            await cursor.execute("""
+                SELECT l.id, l.timestamp, l.source_ip, l.method, l.uri,
+                       g.country, g.country_code, g.city, g.lat, g.lon
+                FROM honeypot_logs l
+                LEFT JOIN ip_geo_cache g ON l.source_ip = g.ip_address
+                WHERE l.method IN ('INVITE', 'REGISTER')
+                  AND g.lat IS NOT NULL
+                ORDER BY l.timestamp DESC
+                LIMIT 100
+            """)
+            logs = await cursor.fetchall()
+
+        attacks = []
+        for log in logs:
+            origin_lat = float(log['lat']) if log['lat'] else None
+            origin_lon = float(log['lon']) if log['lon'] else None
+
+            if not origin_lat or not origin_lon:
+                continue
+
+            attack = {
+                'id': log['id'],
+                'timestamp': log['timestamp'].isoformat() if log['timestamp'] else None,
+                'source_ip': log['source_ip'],
+                'method': log['method'],
+                'origin': {
+                    'lat': origin_lat,
+                    'lon': origin_lon,
+                    'country': log['country'],
+                    'country_code': log['country_code'],
+                    'city': log['city']
+                },
+                'destination': None
+            }
+
+            # Try to extract destination from INVITE URI
+            if log['method'] == 'INVITE' and log['uri']:
+                match = re.search(r'sip:?\+?(\d+)[@\s]', log['uri'], re.I)
+                if match:
+                    number = match.group(1)
+                    if len(number) >= 7:
+                        for prefix in sorted_prefixes:
+                            if number.startswith(prefix):
+                                dest_code = phone_codes[prefix]
+                                if dest_code in country_coords:
+                                    dest_lat, dest_lon = country_coords[dest_code]
+                                    attack['destination'] = {
+                                        'lat': dest_lat,
+                                        'lon': dest_lon,
+                                        'country_code': dest_code,
+                                        'number': number[:4] + '...'
+                                    }
+                                break
+
+            attacks.append(attack)
+
+        return json_response({'attacks': attacks})
 
     @auth_required()
     async def get_active_sessions(self, request):
