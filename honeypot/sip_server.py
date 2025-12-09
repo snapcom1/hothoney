@@ -691,10 +691,11 @@ Content-Length: {len(sdp_bytes)}\r
 class SIPProtocol(asyncio.DatagramProtocol):
     """Asyncio UDP Protocol for SIP"""
 
-    def __init__(self, honeypot: SIPHoneypot, log_callback=None, stats_callback=None):
+    def __init__(self, honeypot: SIPHoneypot, log_callback=None, stats_callback=None, get_tarpit_config_callback=None):
         self.honeypot = honeypot
         self.log_callback = log_callback
         self.stats_callback = stats_callback
+        self.get_tarpit_config_callback = get_tarpit_config_callback
         # Track active tarpit sessions by call-id
         self.tarpit_sessions: Dict[str, asyncio.Task] = {}
         # Track session metadata for display
@@ -895,9 +896,17 @@ class SIPProtocol(asyncio.DatagramProtocol):
             answer = self.honeypot.generate_invite_ok_response(msg, addr, to_tag)
             self.transport.sendto(answer, addr)
 
+            # Get fresh tarpit config (allows dynamic setting changes without restart)
+            current_config = self.honeypot.tarpit_config
+            if self.get_tarpit_config_callback:
+                try:
+                    current_config = await self.get_tarpit_config_callback()
+                except Exception as e:
+                    logger.debug(f"Failed to get fresh tarpit config: {e}")
+
             # Random call duration from settings
-            min_minutes = self.honeypot.tarpit_config.get('call_min_minutes', 5)
-            max_minutes = self.honeypot.tarpit_config.get('call_max_minutes', 20)
+            min_minutes = current_config.get('call_min_minutes', 5)
+            max_minutes = current_config.get('call_max_minutes', 20)
             call_duration_min = random.randint(min_minutes, max_minutes)
             call_duration_sec = call_duration_min * 60
             answered_time = datetime.now(timezone.utc)
@@ -916,10 +925,10 @@ class SIPProtocol(asyncio.DatagramProtocol):
                     'call_duration_planned': call_duration_sec
                 })
 
-            # Check if RTP fart sending is enabled in settings
+            # Check if RTP fart sending is enabled in settings (uses fresh config)
             fart_sender = None
             fart_task = None
-            rtp_farts_enabled = self.honeypot.tarpit_config.get('rtp_farts', False)
+            rtp_farts_enabled = current_config.get('rtp_farts', False)
 
             if rtp_farts_enabled and rtp_ip and rtp_port:
                 logger.info(f"Tarpit answered call for {source_ip} - sending farts to {rtp_ip}:{rtp_port} for {call_duration_min} min")
@@ -973,7 +982,7 @@ class SIPProtocol(asyncio.DatagramProtocol):
 async def run_sip_honeypot(host: str = '0.0.0.0', port: int = 5060, log_callback=None,
                           tarpit_config: Dict = None, is_blocked_callback: Callable = None,
                           throttle_config: Dict = None, protocol_holder: dict = None,
-                          stats_callback=None):
+                          stats_callback=None, get_tarpit_config_callback=None):
     """Run the SIP honeypot server"""
     honeypot = SIPHoneypot(
         host=host,
@@ -985,7 +994,7 @@ async def run_sip_honeypot(host: str = '0.0.0.0', port: int = 5060, log_callback
 
     loop = asyncio.get_event_loop()
     transport, protocol = await loop.create_datagram_endpoint(
-        lambda: SIPProtocol(honeypot, log_callback, stats_callback),
+        lambda: SIPProtocol(honeypot, log_callback, stats_callback, get_tarpit_config_callback),
         local_addr=(host, port)
     )
 

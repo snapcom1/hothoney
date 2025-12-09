@@ -180,7 +180,8 @@ class SIPHoneypotApp:
             is_blocked_callback=self.is_ip_blocked,
             throttle_config=throttle_config,
             protocol_holder=self.sip_protocol_holder,
-            stats_callback=self.update_stats
+            stats_callback=self.update_stats,
+            get_tarpit_config_callback=self.get_tarpit_config
         )
 
     async def run_http_server(self):
