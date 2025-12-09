@@ -117,6 +117,11 @@ class ProvisioningHoneypot:
         self.app.router.add_get('/Yealink/config/{mac}.cfg', self.yealink_config)
         self.app.router.add_get('/{mac}.boot', self.yealink_boot)
 
+        # NetSapiens cfg endpoints (e.g., /cfg/44dbd2ab5806.cfg-text)
+        self.app.router.add_get('/cfg/{mac}.cfg-text', self.netsapiens_cfg_text)
+        self.app.router.add_get('/cfg/{mac}.cfg', self.netsapiens_cfg_text)
+        self.app.router.add_get('/cfg/{mac}', self.netsapiens_cfg_text)
+
         # Grandstream endpoints (must be before generic patterns)
         self.app.router.add_get('/cfg{mac}', self.grandstream_config)
         self.app.router.add_get('/cfg{mac}.xml', self.grandstream_config)
@@ -342,6 +347,60 @@ overwrite_mode = 1
 """
         logger.info(f"Serving Grandstream config for MAC {mac} with ext {creds['extension']}")
         return web.Response(text=config, content_type='text/xml')
+
+    async def netsapiens_cfg_text(self, request):
+        """Fake NetSapiens cfg-text provisioning format"""
+        mac = self._extract_mac(request)
+        creds = self._generate_fake_credentials(mac)
+
+        # NetSapiens uses a simple key=value format
+        config = f"""# NetSapiens Device Configuration
+# MAC: {creds['mac_formatted']}
+# Generated: {datetime.utcnow().isoformat()}
+
+# SIP Account Settings
+sip_account_1_enabled=yes
+sip_account_1_username={creds['extension']}
+sip_account_1_auth_name={creds['auth_user']}
+sip_account_1_password={creds['password']}
+sip_account_1_display_name={creds['display_name']}
+sip_account_1_registrar={creds['sip_server']}
+sip_account_1_registrar_port=5060
+sip_account_1_proxy={creds['proxy_server']}
+sip_account_1_proxy_port=5060
+sip_account_1_transport=udp
+sip_account_1_register_expires=3600
+
+# Voicemail
+voicemail_number=*97
+voicemail_enabled=yes
+
+# Network Settings
+network_dhcp=yes
+network_vlan_enabled=no
+
+# Provisioning
+provision_server=http://{creds['sip_server']}/cfg/
+provision_interval=3600
+
+# Phone Settings
+phone_language=English
+phone_timezone=America/Chicago
+phone_date_format=M/D/Y
+phone_time_format=12hr
+
+# Audio Settings
+audio_codec_1=G.711u
+audio_codec_2=G.711a
+audio_codec_3=G.729
+
+# Features
+feature_call_waiting=yes
+feature_dnd=no
+feature_forwarding=yes
+"""
+        logger.info(f"Serving NetSapiens cfg-text for MAC {mac} with ext {creds['extension']}")
+        return web.Response(text=config, content_type='text/plain')
 
     async def netsapiens_admin_login(self, request):
         """Fake NetSapiens admin login page"""
