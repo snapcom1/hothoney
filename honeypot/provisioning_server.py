@@ -106,6 +106,44 @@ class ProvisioningHoneypot:
             'mac_formatted': self._format_mac(mac),
         }
 
+    async def _log_credentials_sent(self, request, creds: dict, config_type: str):
+        """Log when fake credentials are sent to an attacker"""
+        source_ip = request.remote
+        forwarded = request.headers.get('X-Forwarded-For')
+        if forwarded:
+            source_ip = forwarded.split(',')[0].strip()
+
+        logger.warning(
+            f"FAKE CREDENTIALS SENT - Type: {config_type}, MAC: {creds['mac']}, "
+            f"Ext: {creds['extension']}, User: {creds['auth_user']}, Pass: {creds['password']}, "
+            f"Server: {creds['sip_server']}, To: {source_ip}"
+        )
+
+        if self.log_callback:
+            log_entry = {
+                'timestamp': datetime.utcnow().isoformat(),
+                'source_ip': source_ip,
+                'source_port': 0,
+                'method': 'CREDENTIALS_SENT',
+                'uri': request.path,
+                'path': request.path,
+                'user_agent': request.headers.get('User-Agent', 'unknown'),
+                'protocol': 'HTTP',
+                'honeypot_type': 'provisioning',
+                'config_type': config_type,
+                'credentials_sent': {
+                    'mac': creds['mac'],
+                    'mac_formatted': creds['mac_formatted'],
+                    'extension': creds['extension'],
+                    'auth_user': creds['auth_user'],
+                    'password': creds['password'],
+                    'display_name': creds['display_name'],
+                    'sip_server': creds['sip_server'],
+                    'proxy_server': creds['proxy_server'],
+                }
+            }
+            asyncio.create_task(self.log_callback(log_entry))
+
     def _setup_routes(self):
         """Setup all fake provisioning endpoints"""
         # NOTE: More specific routes MUST come before generic catch-all patterns
@@ -249,7 +287,7 @@ class ProvisioningHoneypot:
 />
 </PHONE_CONFIG>
 """
-        logger.info(f"Serving Polycom config for MAC {mac} with ext {creds['extension']}")
+        await self._log_credentials_sent(request, creds, 'polycom')
         return web.Response(text=config, content_type='text/xml')
 
     async def polycom_sip_cfg(self, request):
@@ -264,6 +302,7 @@ class ProvisioningHoneypot:
     <reg reg.1.auth.userId="{creds['auth_user']}" reg.1.auth.password="{creds['password']}"/>
 </sip>
 """
+        await self._log_credentials_sent(request, creds, 'polycom_sip')
         return web.Response(text=config, content_type='text/xml')
 
     async def yealink_config(self, request):
@@ -300,7 +339,7 @@ auto_provision.server.url = http://{creds['sip_server']}/provision/
 network.dhcp_enable = 1
 network.vlan.internet_port_enable = 0
 """
-        logger.info(f"Serving Yealink config for MAC {mac} with ext {creds['extension']}")
+        await self._log_credentials_sent(request, creds, 'yealink')
         return web.Response(text=config, content_type='text/plain')
 
     async def yealink_boot(self, request):
@@ -345,7 +384,7 @@ overwrite_mode = 1
 </config>
 </gs_provision>
 """
-        logger.info(f"Serving Grandstream config for MAC {mac} with ext {creds['extension']}")
+        await self._log_credentials_sent(request, creds, 'grandstream')
         return web.Response(text=config, content_type='text/xml')
 
     async def netsapiens_cfg_text(self, request):
@@ -399,7 +438,7 @@ feature_call_waiting=yes
 feature_dnd=no
 feature_forwarding=yes
 """
-        logger.info(f"Serving NetSapiens cfg-text for MAC {mac} with ext {creds['extension']}")
+        await self._log_credentials_sent(request, creds, 'netsapiens')
         return web.Response(text=config, content_type='text/plain')
 
     async def netsapiens_admin_login(self, request):
