@@ -914,10 +914,17 @@ class SIPProtocol(asyncio.DatagramProtocol):
                     'call_duration_planned': call_duration_sec
                 })
 
-            # RTP fart sending disabled to reduce resource usage
+            # Check if RTP fart sending is enabled in settings
             fart_sender = None
             fart_task = None
-            logger.info(f"Tarpit answered call for {source_ip} - fake {call_duration_min} min call")
+            rtp_farts_enabled = self.honeypot.tarpit_config.get('rtp_farts', False)
+
+            if rtp_farts_enabled and rtp_ip and rtp_port:
+                logger.info(f"Tarpit answered call for {source_ip} - sending farts to {rtp_ip}:{rtp_port} for {call_duration_min} min")
+                fart_sender = RTPFartSender(rtp_ip, rtp_port)
+                fart_task = asyncio.create_task(fart_sender.send_farts(call_duration_sec))
+            else:
+                logger.info(f"Tarpit answered call for {source_ip} - fake {call_duration_min} min call")
 
             # Hold the "call" open - they'll keep sending RTP the whole time
             try:
