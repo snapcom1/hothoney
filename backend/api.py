@@ -458,6 +458,16 @@ class HoneypotAPI:
         # Sort by length for matching
         sorted_prefixes = sorted(phone_codes.keys(), key=len, reverse=True)
 
+        # First, refresh geo data for recent IPs that don't have lat/lon
+        uncached_ips = await self.honeypot_logger.get_uncached_ips(limit=20)
+        for ip in uncached_ips[:10]:  # Limit to 10 to avoid slow response
+            try:
+                geo_data = await quick_lookup_ip(ip)
+                if not geo_data.get('error'):
+                    await self.honeypot_logger.save_ip_geo(ip, geo_data)
+            except Exception as e:
+                logger.debug(f"Failed to get geo for {ip}: {e}")
+
         # Get recent logs with geo data
         async with self.db.get_cursor() as cursor:
             await cursor.execute("""

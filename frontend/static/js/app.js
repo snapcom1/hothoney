@@ -1672,7 +1672,12 @@ class HoneypotDashboard {
 
     formatDate(dateStr) {
         if (!dateStr) return '-';
-        const date = new Date(dateStr);
+        // Append 'Z' if no timezone info to indicate UTC
+        let normalized = dateStr;
+        if (!dateStr.endsWith('Z') && !dateStr.includes('+') && !dateStr.includes('-', 10)) {
+            normalized = dateStr + 'Z';
+        }
+        const date = new Date(normalized);
         return date.toLocaleString();
     }
 

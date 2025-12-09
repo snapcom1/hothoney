@@ -775,6 +775,20 @@ class HoneypotLogger:
             )
             return await cursor.fetchone()
 
+    async def get_uncached_ips(self, limit: int = 50) -> List[str]:
+        """Get IPs from logs that don't have geo data cached"""
+        async with self.db.get_cursor() as cursor:
+            await cursor.execute("""
+                SELECT DISTINCT l.source_ip
+                FROM honeypot_logs l
+                LEFT JOIN ip_geo_cache g ON l.source_ip = g.ip_address
+                WHERE g.ip_address IS NULL OR g.lat IS NULL
+                ORDER BY l.timestamp DESC
+                LIMIT %s
+            """, (limit,))
+            rows = await cursor.fetchall()
+            return [row['source_ip'] for row in rows]
+
     async def get_country_stats(self) -> List[Dict]:
         """Get attack statistics by country"""
         async with self.db.get_cursor() as cursor:
