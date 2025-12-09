@@ -11,7 +11,7 @@ A comprehensive SIP/VoIP honeypot system that captures malicious traffic, wastes
 - **Auto-blocking**: Automatically blocks IPs after configurable threshold of attacks
 
 ### Tarpit & Resource Wasting
-- **Call Tarpitting**: Answers INVITE requests and keeps attackers on the line for 5-20 minutes
+- **Call Tarpitting**: Answers INVITE requests and keeps attackers on the line for 1-3 hours
 - **Fake Registration Success**: Responds with 200 OK to REGISTER attempts (after capturing credentials)
 - **RTP Fart Sounds**: Sends synthetic fart audio via RTP to answered calls, wasting attacker bandwidth 💨
 - **Random Delays**: Randomized ring duration (5-20 seconds) before answering to appear more realistic
@@ -232,7 +232,7 @@ When an attacker sends an INVITE (call attempt), the honeypot:
 
 1. **Rings** for 5-20 seconds (randomized) with 180 Ringing responses
 2. **Answers** with 200 OK containing a fake SDP
-3. **Holds the call** for 5-20 minutes while sending RTP audio
+3. **Holds the call** for 1-3 hours while sending RTP audio
 4. **Sends fart sounds** via RTP to the attacker's media port 💨
 
 This wastes attacker resources:
