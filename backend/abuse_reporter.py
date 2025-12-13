@@ -5,12 +5,14 @@ Abuse Reporter Module - Sends abuse reports to network operators
 
 import asyncio
 import aiohttp
+import json
 import logging
 import os
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
-from datetime import datetime, timedelta
+from email.mime.application import MIMEApplication
+from datetime import datetime, timedelta, timezone
 from typing import Optional, Dict, List
 from zoneinfo import ZoneInfo
 from ip_lookup import lookup_ip
@@ -316,10 +318,90 @@ If you have questions about this report, please reply to this email.
 Logs and evidence are available upon request.
 
 ---
-This is an automated abuse report. Replies are monitored.
-Report ID: {ip}-{datetime.utcnow().strftime('%Y%m%d%H%M%S')}
+This is an automated abuse report in X-ARF format. Replies are monitored.
+Report ID: {ip}-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}
 """
         return report
+
+    def generate_xarf_json(self, ip: str, abuse_contact: str, ip_info: Dict, attack_summary: Dict) -> Dict:
+        """Generate X-ARF machine-readable JSON report"""
+        now = datetime.now(timezone.utc)
+        first_seen = attack_summary.get('first_seen')
+        last_seen = attack_summary.get('last_seen')
+
+        # Convert timestamps to ISO format
+        if first_seen and hasattr(first_seen, 'isoformat'):
+            first_seen_iso = first_seen.replace(tzinfo=timezone.utc).isoformat() if first_seen.tzinfo is None else first_seen.isoformat()
+        else:
+            first_seen_iso = str(first_seen) if first_seen else now.isoformat()
+
+        if last_seen and hasattr(last_seen, 'isoformat'):
+            last_seen_iso = last_seen.replace(tzinfo=timezone.utc).isoformat() if last_seen.tzinfo is None else last_seen.isoformat()
+        else:
+            last_seen_iso = str(last_seen) if last_seen else now.isoformat()
+
+        # Build attack details
+        attack_types = []
+        methods = attack_summary.get('methods', {})
+        if methods.get('REGISTER'):
+            attack_types.append('sip-brute-force')
+        if methods.get('INVITE'):
+            attack_types.append('sip-toll-fraud')
+        if methods.get('OPTIONS'):
+            attack_types.append('sip-scanning')
+        if not attack_types:
+            attack_types.append('sip-attack')
+
+        xarf_report = {
+            # X-ARF required fields
+            'Version': '0.2',
+            'ReporterInfo': {
+                'ReporterOrg': self.report_from_name,
+                'ReporterOrgDomain': self.honeypot_name,
+                'ReporterOrgEmail': self.smtp_from,
+                'ReporterContactEmail': self.smtp_from,
+                'ReportType': 'sip-attack'
+            },
+            'Report': {
+                'ReportClass': 'Activity',
+                'ReportType': 'sip-attack',
+                'ReportSubType': attack_types[0],
+                'Date': now.isoformat(),
+                'SourceIp': ip,
+                'SourcePort': 5060,
+                'SourceAsn': ip_info.get('asn'),
+                'SourceAsnOrg': ip_info.get('asn_name'),
+                'DestinationIp': self.honeypot_name,
+                'DestinationPort': 5060,
+                'Protocol': 'udp',
+                'Occurrences': attack_summary.get('total_attacks', 1),
+                'TLP': 'amber'
+            },
+            'EventData': {
+                'Category': 'sip',
+                'Type': 'brute-force' if 'REGISTER' in methods else 'toll-fraud',
+                'FirstSeen': first_seen_iso,
+                'LastSeen': last_seen_iso,
+                'AttackTypes': attack_types,
+                'Methods': methods,
+                'AttemptedUsernames': attack_summary.get('attempted_usernames', [])[:20],
+                'Description': 'SIP/VoIP brute-force attack and toll fraud attempts detected by honeypot'
+            },
+            'SourceInfo': {
+                'Ip': ip,
+                'Network': ip_info.get('network'),
+                'Organization': ip_info.get('organization'),
+                'Country': ip_info.get('country'),
+                'CountryCode': ip_info.get('country_code'),
+                'Asn': ip_info.get('asn'),
+                'AsnName': ip_info.get('asn_name'),
+                'AbuseContact': abuse_contact
+            },
+            'Schema-URL': 'https://www.x-arf.org/schema/abuse_login-attack_0.2.2.json',
+            'Attachment': 'text/plain'
+        }
+
+        return xarf_report
 
     async def send_report(self, ip: str, manual: bool = False) -> Dict:
         """Send an abuse report for an IP address"""
@@ -368,17 +450,40 @@ Report ID: {ip}-{datetime.utcnow().strftime('%Y%m%d%H%M%S')}
             result['error'] = 'No attack logs found for this IP'
             return result
 
-        # Generate email
+        # Generate email content
         report_body = self.generate_report_email(ip, abuse_email, ip_info, attack_summary)
+        xarf_json = self.generate_xarf_json(ip, abuse_email, ip_info, attack_summary)
 
-        # Create email message
-        msg = MIMEMultipart()
+        # Create X-ARF compliant email message
+        # X-ARF requires: multipart/mixed with text/plain and application/json parts
+        msg = MIMEMultipart('mixed')
         msg['From'] = f"{self.report_from_name} <{self.smtp_from}>"
         msg['To'] = abuse_email
-        msg['Subject'] = f"Suspected Abuse: SIP/VoIP attacks from {ip}"
-        msg['X-Abuse-Report-Type'] = 'sip-attack'
+        msg['Subject'] = f"[X-ARF] SIP/VoIP Attack Report: {ip}"
+
+        # X-ARF required headers
+        msg['X-XARF'] = 'PLAIN'
+        msg['X-ARF'] = 'PLAIN'
+        msg['Auto-Submitted'] = 'auto-generated'
+
+        # Additional context headers
+        msg['X-ARF-Version'] = '0.2'
+        msg['X-ARF-Report-Type'] = 'sip-attack'
+        msg['X-ARF-Report-ID'] = f"{ip}-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}"
         msg['X-Reported-IP'] = ip
-        msg.attach(MIMEText(report_body, 'plain'))
+        msg['X-Report-Category'] = 'abuse'
+        msg['X-Report-Subcategory'] = 'sip-brute-force'
+
+        # Part 1: Human-readable text
+        text_part = MIMEText(report_body, 'plain', 'utf-8')
+        msg.attach(text_part)
+
+        # Part 2: X-ARF JSON machine-readable report
+        json_content = json.dumps(xarf_json, indent=2, default=str)
+        json_part = MIMEApplication(json_content.encode('utf-8'), 'json')
+        json_part.add_header('Content-Disposition', 'attachment', filename=f'xarf-report-{ip}.json')
+        json_part.add_header('X-ARF', 'JSON')
+        msg.attach(json_part)
 
         # Send email
         try:
