@@ -131,6 +131,8 @@ class PublicBlocklistManager:
                 }
 
                 # Keep fetching until no more IPs (API returns 250 per batch)
+                # Rate limit: 11 requests per 2 minutes, so wait 12 seconds between batches
+                batch_count = 0
                 while True:
                     payload = {
                         'set': 'sip',
@@ -158,19 +160,34 @@ class PublicBlocklistManager:
                             if not isinstance(ips, list) or len(ips) < 250:
                                 break
 
+                            # Wait between batches to respect rate limit (11 req / 2 min)
+                            batch_count += 1
+                            if batch_count >= 10:
+                                # After 10 batches, wait 2 minutes before continuing
+                                logger.info(f"APIBAN: Imported {imported} IPs, waiting for rate limit reset...")
+                                await asyncio.sleep(120)
+                                batch_count = 0
+                            else:
+                                # Small delay between batches
+                                await asyncio.sleep(1)
+
                         elif resp.status == 404:
                             # No new IPs
                             break
                         elif resp.status == 401:
                             raise Exception("Invalid API key")
                         elif resp.status == 400:
-                            # Try to get error details from response
+                            # Check if it's a rate limit disguised as 400
                             try:
                                 err_data = await resp.json()
                                 err_msg = err_data.get('ID', 'Bad request')
+                                if 'rate' in err_msg.lower() or 'limit' in err_msg.lower():
+                                    raise Exception("Rate limited - try again later")
                                 raise Exception(f"APIBAN error: {err_msg}")
-                            except:
-                                raise Exception("Invalid request - check API key format")
+                            except Exception as e:
+                                if 'Rate limited' in str(e):
+                                    raise
+                                raise Exception("Rate limited or invalid request - try again later")
                         elif resp.status == 429:
                             raise Exception("Rate limited - try again later")
                         elif resp.status == 503:
