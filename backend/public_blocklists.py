@@ -116,9 +116,9 @@ class PublicBlocklistManager:
         if not api_key:
             return {'success': False, 'error': 'APIBAN API key not configured'}
 
-        last_id = config['last_id'] or 'initial'
+        current_id = config['last_id'] or ''
         imported = 0
-        new_last_id = last_id
+        new_last_id = current_id
 
         try:
             async with aiohttp.ClientSession() as session:
@@ -129,46 +129,56 @@ class PublicBlocklistManager:
                     'Authorization': f'Bearer {api_key}',
                     'Content-Type': 'application/json'
                 }
-                payload = {
-                    'set': 'sip',
-                    'id': last_id if last_id != 'initial' else ''
-                }
 
-                async with session.post(url, headers=headers, json=payload, timeout=30) as resp:
-                    if resp.status == 200:
-                        data = await resp.json()
+                # Keep fetching until no more IPs (API returns 250 per batch)
+                while True:
+                    payload = {
+                        'set': 'sip',
+                        'id': current_id
+                    }
 
-                        if 'ipaddress' in data:
-                            ips = data['ipaddress']
-                            if isinstance(ips, list):
-                                for ip in ips:
-                                    await self._import_ip(ip, 'apiban')
-                                    imported += 1
+                    async with session.post(url, headers=headers, json=payload, timeout=30) as resp:
+                        if resp.status == 200:
+                            data = await resp.json()
 
-                        if 'ID' in data:
-                            new_last_id = data['ID']
+                            if 'ipaddress' in data:
+                                ips = data['ipaddress']
+                                if isinstance(ips, list):
+                                    for ip in ips:
+                                        await self._import_ip(ip, 'apiban')
+                                        imported += 1
 
-                    elif resp.status == 401:
-                        raise Exception("Invalid API key")
-                    elif resp.status == 400:
-                        # Try to get error details from response
-                        try:
-                            err_data = await resp.json()
-                            err_msg = err_data.get('ID', 'Bad request')
-                            raise Exception(f"APIBAN error: {err_msg}")
-                        except:
-                            raise Exception("Invalid request - check API key format")
-                    elif resp.status == 429:
-                        raise Exception("Rate limited - try again later")
-                    elif resp.status == 404:
-                        # No new IPs
-                        pass
-                    elif resp.status == 503:
-                        raise Exception("APIBAN service temporarily unavailable - try again later")
-                    elif resp.status >= 500:
-                        raise Exception(f"APIBAN server error ({resp.status}) - try again later")
-                    else:
-                        raise Exception(f"API returned status {resp.status}")
+                            if 'ID' in data:
+                                new_last_id = data['ID']
+                                current_id = data['ID']  # Use this ID for next batch
+                            else:
+                                break  # No more batches
+
+                            # If we got less than 250, we're done
+                            if not isinstance(ips, list) or len(ips) < 250:
+                                break
+
+                        elif resp.status == 404:
+                            # No new IPs
+                            break
+                        elif resp.status == 401:
+                            raise Exception("Invalid API key")
+                        elif resp.status == 400:
+                            # Try to get error details from response
+                            try:
+                                err_data = await resp.json()
+                                err_msg = err_data.get('ID', 'Bad request')
+                                raise Exception(f"APIBAN error: {err_msg}")
+                            except:
+                                raise Exception("Invalid request - check API key format")
+                        elif resp.status == 429:
+                            raise Exception("Rate limited - try again later")
+                        elif resp.status == 503:
+                            raise Exception("APIBAN service temporarily unavailable - try again later")
+                        elif resp.status >= 500:
+                            raise Exception(f"APIBAN server error ({resp.status}) - try again later")
+                        else:
+                            raise Exception(f"API returned status {resp.status}")
 
             # Update config
             async with self.db.get_cursor() as cursor:
