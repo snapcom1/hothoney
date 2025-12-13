@@ -507,9 +507,14 @@ class HoneypotAPI:
 
             # Try to extract destination from INVITE URI
             if log['method'] == 'INVITE' and log['uri']:
-                match = re.search(r'sip:?\+?(\d+)[@\s]', log['uri'], re.I)
+                # Match various SIP URI formats:
+                # sip:+1234567890@domain, sip:1234567890@domain, sip:+1234567890
+                # Also handle 00 prefix (international) and just digits
+                match = re.search(r'sip:(?:\+|00)?(\d{7,15})', log['uri'], re.I)
                 if match:
                     number = match.group(1)
+                    # Strip leading zeros if present
+                    number = number.lstrip('0') or number
                     if len(number) >= 7:
                         for prefix in sorted_prefixes:
                             if number.startswith(prefix):

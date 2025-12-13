@@ -1134,16 +1134,21 @@ textarea {
 
 /* Pulsing markers */
 .pulse-marker {
-    animation: pulse-ring 1.5s ease-out infinite;
+    animation: pulse-glow 1.5s ease-in-out infinite;
 }
 
-@keyframes pulse-ring {
+@keyframes pulse-glow {
     0% {
-        opacity: 1;
+        stroke-opacity: 0.8;
+        stroke-width: 2;
+    }
+    50% {
+        stroke-opacity: 0.3;
+        stroke-width: 4;
     }
     100% {
-        opacity: 0;
-        transform: scale(2);
+        stroke-opacity: 0.8;
+        stroke-width: 2;
     }
 }
 

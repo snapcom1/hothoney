@@ -1797,7 +1797,16 @@ class HoneypotDashboard {
             }
         });
 
-        // Create origin markers (red, glowing)
+        // Clear previous pulse markers and interval
+        if (this.pulseInterval) {
+            clearInterval(this.pulseInterval);
+        }
+        if (this.pulseMarkers) {
+            this.pulseMarkers.forEach(pm => this.originMarkers.removeLayer(pm.marker));
+        }
+        this.pulseMarkers = [];
+
+        // Create origin markers (red, glowing) with pulse rings
         origins.forEach((origin, key) => {
             const size = Math.min(8 + origin.count * 2, 20);
             const marker = L.circleMarker([origin.lat, origin.lon], {
@@ -1819,20 +1828,37 @@ class HoneypotDashboard {
 
             this.originMarkers.addLayer(marker);
 
-            // Add pulse effect for recent attacks
-            if (origin.count > 0) {
-                const pulse = L.circleMarker([origin.lat, origin.lon], {
-                    radius: size,
-                    fillColor: '#ef4444',
-                    fillOpacity: 0,
-                    color: '#ef4444',
-                    weight: 2,
-                    opacity: 0.5,
-                    className: 'pulse-marker'
-                });
-                this.originMarkers.addLayer(pulse);
-            }
+            // Create pulse marker for this origin
+            const pulseMarker = L.circleMarker([origin.lat, origin.lon], {
+                radius: 15,
+                fillColor: 'transparent',
+                fillOpacity: 0,
+                color: '#ff0000',
+                weight: 3,
+                opacity: 0.8
+            });
+            this.originMarkers.addLayer(pulseMarker);
+            this.pulseMarkers.push({ marker: pulseMarker, radius: 15 + Math.random() * 10 });
         });
+
+        // Animate all pulse markers
+        if (this.pulseMarkers.length > 0) {
+            this.pulseInterval = setInterval(() => {
+                this.pulseMarkers.forEach(pm => {
+                    if (!pm.marker) return;
+
+                    pm.radius += 0.8;
+                    const opacity = 0.9 - (pm.radius - 15) * 0.04;
+
+                    if (pm.radius >= 35) {
+                        pm.radius = 15;
+                    }
+
+                    pm.marker.setRadius(pm.radius);
+                    pm.marker.setStyle({ opacity: Math.max(0, opacity) });
+                });
+            }, 40);
+        }
 
         // Create destination markers (green)
         destinations.forEach((dest, key) => {
@@ -1918,6 +1944,11 @@ class HoneypotDashboard {
             clearInterval(this.attackMapInterval);
             this.attackMapInterval = null;
         }
+        if (this.pulseInterval) {
+            clearInterval(this.pulseInterval);
+            this.pulseInterval = null;
+        }
+        this.pulseMarkers = [];
         if (this.attackMap) {
             this.attackMap.remove();
             this.attackMap = null;
