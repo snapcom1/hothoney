@@ -577,9 +577,10 @@ class HoneypotAPI:
         offset = int(request.query.get('offset', 0))
         active_only = request.query.get('active', 'true').lower() == 'true'
         source_filter = request.query.get('source', '')  # 'internal', 'external', or ''
+        search = request.query.get('search', '').strip()
 
-        ips = await self.blocklist.get_blocked_ips(active_only, limit, offset, source_filter)
-        total = await self.blocklist.get_blocked_ip_count(active_only, source_filter)
+        ips = await self.blocklist.get_blocked_ips(active_only, limit, offset, source_filter, search)
+        total = await self.blocklist.get_blocked_ip_count(active_only, source_filter, search)
 
         # Convert datetime objects to strings
         for ip in ips:
@@ -1338,6 +1339,28 @@ class HoneypotAPI:
             logger.error(f"Sync public blocklist error: {e}")
             return json_response({'error': str(e)}, status=500)
 
+    async def auto_sync_blocklists(self):
+        """Background task to auto-sync public blocklists every 5 minutes"""
+        # Wait a bit before first sync to let everything initialize
+        await asyncio.sleep(30)
+
+        while True:
+            try:
+                # Check if APIBAN is enabled
+                config = await self.public_blocklist_mgr.get_config('apiban')
+                if config and config.get('enabled') and config.get('api_key'):
+                    logger.info("Auto-sync: Starting APIBAN sync...")
+                    result = await self.public_blocklist_mgr.sync_apiban()
+                    if result.get('success'):
+                        logger.info(f"Auto-sync: APIBAN sync complete - {result.get('new_ips', 0)} new IPs")
+                    else:
+                        logger.warning(f"Auto-sync: APIBAN sync failed - {result.get('error', 'Unknown error')}")
+            except Exception as e:
+                logger.error(f"Auto-sync error: {e}")
+
+            # Wait 5 minutes before next sync
+            await asyncio.sleep(300)
+
     # Frontend serving
     async def serve_index(self, request):
         """Serve frontend index.html"""
@@ -1397,10 +1420,15 @@ async def run_api(host: str = '0.0.0.0', port: int = 8081, db: Database = None):
     await site.start()
     logger.info(f"API server started on http://{host}:{port}")
 
+    # Start background task for auto-syncing public blocklists
+    sync_task = asyncio.create_task(api.auto_sync_blocklists())
+    logger.info("Started auto-sync background task for public blocklists")
+
     try:
         while True:
             await asyncio.sleep(3600)
     except asyncio.CancelledError:
+        sync_task.cancel()
         await runner.cleanup()
 
 

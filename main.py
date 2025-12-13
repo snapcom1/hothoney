@@ -150,10 +150,15 @@ class SIPHoneypotApp:
         await site.start()
         logger.info(f"API server started on http://{self.config['api_host']}:{self.config['api_port']}")
 
+        # Start background task for auto-syncing public blocklists
+        sync_task = asyncio.create_task(api.auto_sync_blocklists())
+        logger.info("Started auto-sync background task for public blocklists")
+
         try:
             while True:
                 await asyncio.sleep(3600)
         except asyncio.CancelledError:
+            sync_task.cancel()
             await runner.cleanup()
 
     async def update_stats(self, stat_name: str, value: int):

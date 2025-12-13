@@ -282,7 +282,7 @@ class BlocklistManager:
             return 60  # Default
 
     async def get_blocked_ips(self, active_only: bool = True, limit: int = 1000,
-                               offset: int = 0, source_filter: str = '') -> List[Dict]:
+                               offset: int = 0, source_filter: str = '', search: str = '') -> List[Dict]:
         """Get list of blocked IPs (excludes expired IPs based on settings)"""
         expiry_days = await self._get_expiry_days()
         async with self.db.get_cursor() as cursor:
@@ -294,33 +294,54 @@ class BlocklistManager:
                 FROM blocked_ips b
             """
             conditions = []
+            params = []
             if active_only:
                 conditions.append(f"b.active = TRUE AND b.last_seen >= DATE_SUB(NOW(), INTERVAL {expiry_days} DAY)")
             if source_filter == 'external':
                 conditions.append("b.added_by IN ('apiban')")
             elif source_filter == 'internal':
                 conditions.append("(b.added_by IS NULL OR b.added_by NOT IN ('apiban'))")
+            elif source_filter == 'both':
+                # IPs that are internal but also exist in APIBAN
+                conditions.append("""(b.added_by IS NULL OR b.added_by NOT IN ('apiban'))
+                    AND EXISTS (SELECT 1 FROM public_blocklist_ips p
+                                WHERE p.ip_address = b.ip_address AND p.list_id = 'apiban')""")
+            if search:
+                conditions.append("(b.ip_address LIKE %s OR b.reason LIKE %s)")
+                search_pattern = f"%{search}%"
+                params.extend([search_pattern, search_pattern])
             if conditions:
                 query += " WHERE " + " AND ".join(conditions)
             query += " ORDER BY b.last_seen DESC LIMIT %s OFFSET %s"
-            await cursor.execute(query, (limit, offset))
+            params.extend([limit, offset])
+            await cursor.execute(query, params)
             return await cursor.fetchall()
 
-    async def get_blocked_ip_count(self, active_only: bool = True, source_filter: str = '') -> int:
+    async def get_blocked_ip_count(self, active_only: bool = True, source_filter: str = '', search: str = '') -> int:
         """Get count of blocked IPs (excludes expired IPs based on settings)"""
         expiry_days = await self._get_expiry_days()
         async with self.db.get_cursor() as cursor:
             query = "SELECT COUNT(*) as count FROM blocked_ips"
             conditions = []
+            params = []
             if active_only:
                 conditions.append(f"active = TRUE AND last_seen >= DATE_SUB(NOW(), INTERVAL {expiry_days} DAY)")
             if source_filter == 'external':
                 conditions.append("added_by IN ('apiban')")
             elif source_filter == 'internal':
                 conditions.append("(added_by IS NULL OR added_by NOT IN ('apiban'))")
+            elif source_filter == 'both':
+                # IPs that are internal but also exist in APIBAN
+                conditions.append("""(added_by IS NULL OR added_by NOT IN ('apiban'))
+                    AND EXISTS (SELECT 1 FROM public_blocklist_ips p
+                                WHERE p.ip_address = blocked_ips.ip_address AND p.list_id = 'apiban')""")
+            if search:
+                conditions.append("(ip_address LIKE %s OR reason LIKE %s)")
+                search_pattern = f"%{search}%"
+                params.extend([search_pattern, search_pattern])
             if conditions:
                 query += " WHERE " + " AND ".join(conditions)
-            await cursor.execute(query)
+            await cursor.execute(query, params if params else None)
             result = await cursor.fetchone()
             return result['count']
 

@@ -151,7 +151,7 @@ class HoneypotDashboard {
         document.getElementById('blocklist-prev').addEventListener('click', () => this.blocklistPrevPage());
         document.getElementById('blocklist-next').addEventListener('click', () => this.blocklistNextPage());
         document.getElementById('blocklist-search').addEventListener('input',
-            this.debounce(() => this.loadBlocklist(), 300));
+            this.debounce(() => { this.blocklistOffset = 0; this.loadBlocklist(); }, 300));
         document.getElementById('blocklist-source-filter').addEventListener('change', () => {
             this.blocklistOffset = 0;
             this.loadBlocklist();
@@ -648,17 +648,18 @@ class HoneypotDashboard {
                 document.getElementById('external-blocklists-card')?.classList.add('hidden');
             }
 
-            const search = document.getElementById('blocklist-search').value;
+            const search = document.getElementById('blocklist-search').value.trim();
             const sourceFilter = document.getElementById('blocklist-source-filter').value;
             let url = `/blocklist?limit=${this.pageSize}&offset=${this.blocklistOffset}`;
             if (sourceFilter) url += `&source=${sourceFilter}`;
+            if (search) url += `&search=${encodeURIComponent(search)}`;
             const data = await this.api(url);
 
             const tbody = document.querySelector('#blocklist-table tbody');
             const isAdmin = this.user?.role === 'admin';
             tbody.innerHTML = data.ips.map(ip => {
                 const isExternal = ip.added_by === 'apiban';
-                const isInApiban = ip.in_apiban === true;
+                const isInApiban = ip.in_apiban === true || ip.in_apiban === 1;
                 let sourceLabel;
                 if (!isExternal && isInApiban) {
                     sourceLabel = '<span class="badge badge-both">Both</span>';
