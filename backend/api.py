@@ -1344,17 +1344,30 @@ class HoneypotAPI:
         # Wait a bit before first sync to let everything initialize
         await asyncio.sleep(30)
 
+        sync_count = 0
         while True:
             try:
                 # Check if APIBAN is enabled
                 config = await self.public_blocklist_mgr.get_config('apiban')
                 if config and config.get('enabled') and config.get('api_key'):
+                    # Sync new IPs
                     logger.info("Auto-sync: Starting APIBAN sync...")
                     result = await self.public_blocklist_mgr.sync_apiban()
                     if result.get('success'):
-                        logger.info(f"Auto-sync: APIBAN sync complete - {result.get('new_ips', 0)} new IPs")
+                        logger.info(f"Auto-sync: APIBAN sync complete - {result.get('imported', 0)} new IPs")
                     else:
                         logger.warning(f"Auto-sync: APIBAN sync failed - {result.get('error', 'Unknown error')}")
+
+                    # Run cleanup every 12 syncs (once per hour at 5-min intervals)
+                    sync_count += 1
+                    if sync_count >= 12:
+                        sync_count = 0
+                        logger.info("Auto-sync: Starting APIBAN cleanup (removing delisted IPs)...")
+                        cleanup_result = await self.public_blocklist_mgr.cleanup_apiban()
+                        if cleanup_result.get('success'):
+                            logger.info(f"Auto-sync: APIBAN cleanup complete - {cleanup_result.get('removed', 0)} removed")
+                        else:
+                            logger.warning(f"Auto-sync: APIBAN cleanup failed - {cleanup_result.get('error', 'Unknown error')}")
             except Exception as e:
                 logger.error(f"Auto-sync error: {e}")
 

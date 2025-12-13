@@ -217,6 +217,87 @@ class PublicBlocklistManager:
             result = await cursor.fetchone()
             return result['count']
 
+    async def cleanup_apiban(self) -> Dict:
+        """Remove IPs that are no longer in APIBAN's list"""
+        config = await self.get_config('apiban')
+        if not config or not config['enabled']:
+            return {'success': False, 'error': 'APIBAN not enabled'}
+
+        api_key = config['api_key']
+        if not api_key:
+            return {'success': False, 'error': 'APIBAN API key not configured'}
+
+        removed = 0
+        checked = 0
+        errors = 0
+
+        try:
+            # Get all IPs we imported from APIBAN
+            async with self.db.get_cursor() as cursor:
+                await cursor.execute("""
+                    SELECT ip_address FROM public_blocklist_ips
+                    WHERE list_id = 'apiban'
+                """)
+                apiban_ips = [row['ip_address'] for row in await cursor.fetchall()]
+
+            if not apiban_ips:
+                return {'success': True, 'removed': 0, 'checked': 0}
+
+            async with aiohttp.ClientSession() as session:
+                headers = {
+                    'User-Agent': 'SIP-Honeypot/1.0',
+                    'Authorization': f'Bearer {api_key}',
+                    'Content-Type': 'application/json'
+                }
+
+                # Check each IP (with rate limiting - max 5 per second)
+                for ip in apiban_ips:
+                    try:
+                        url = "https://apiban.org/api/check"
+                        payload = {'set': 'sip', 'ipaddress': ip}
+
+                        async with session.post(url, headers=headers, json=payload, timeout=10) as resp:
+                            checked += 1
+
+                            if resp.status == 404:
+                                # IP is no longer banned - remove it
+                                await self._remove_apiban_ip(ip)
+                                removed += 1
+                                logger.info(f"Removed delisted APIBAN IP: {ip}")
+                            elif resp.status == 429:
+                                # Rate limited - stop and try again later
+                                logger.warning("APIBAN rate limit hit during cleanup")
+                                break
+
+                        # Rate limit ourselves: ~5 requests per second
+                        await asyncio.sleep(0.2)
+
+                    except Exception as e:
+                        errors += 1
+                        logger.debug(f"Error checking IP {ip}: {e}")
+
+            logger.info(f"APIBAN cleanup complete: {removed} removed, {checked} checked, {errors} errors")
+            return {'success': True, 'removed': removed, 'checked': checked, 'errors': errors}
+
+        except Exception as e:
+            logger.error(f"APIBAN cleanup failed: {e}")
+            return {'success': False, 'error': str(e)}
+
+    async def _remove_apiban_ip(self, ip: str):
+        """Remove an IP that was imported from APIBAN"""
+        async with self.db.get_cursor() as cursor:
+            # Remove from tracking table
+            await cursor.execute("""
+                DELETE FROM public_blocklist_ips
+                WHERE ip_address = %s AND list_id = 'apiban'
+            """, (ip,))
+
+            # Remove from blocklist (only if added by apiban)
+            await cursor.execute("""
+                DELETE FROM blocked_ips
+                WHERE ip_address = %s AND added_by = 'apiban'
+            """, (ip,))
+
     async def sync_all(self) -> Dict:
         """Sync all enabled blocklists"""
         results = {}
