@@ -428,6 +428,21 @@
                             <input type="number" id="abuse_report_cooldown_days" name="abuse_report_cooldown_days" min="1" max="90" placeholder="7">
                             <p class="help-text">Minimum days between sending reports for the same IP address.</p>
                         </div>
+                        <div class="form-group">
+                            <label for="abuse_report_org_name">Organization Name</label>
+                            <input type="text" id="abuse_report_org_name" name="abuse_report_org_name" placeholder="Snapcom.com">
+                            <p class="help-text">Your organization name used in report emails.</p>
+                        </div>
+                        <div class="form-group">
+                            <label for="abuse_report_intro">Report Intro Line</label>
+                            <input type="text" id="abuse_report_intro" name="abuse_report_intro" placeholder="This is an automated abuse report from the Snapcom.com NOC.">
+                            <p class="help-text">Opening line of the abuse report email. Leave blank to auto-generate from org name.</p>
+                        </div>
+                        <div class="form-group">
+                            <label for="abuse_report_subject_prefix">Email Subject Prefix</label>
+                            <input type="text" id="abuse_report_subject_prefix" name="abuse_report_subject_prefix" placeholder="[X-ARF] SIP/VoIP Attack Report">
+                            <p class="help-text">Subject line prefix. The attacker IP will be appended automatically.</p>
+                        </div>
                     </div>
 
                     <div class="card">

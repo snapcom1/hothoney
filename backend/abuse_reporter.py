@@ -57,6 +57,9 @@ class AbuseReporter:
             self.smtp_pass = settings.get('smtp_pass') or os.environ.get('SMTP_PASS', '')
             self.smtp_from = settings.get('smtp_from') or os.environ.get('SMTP_FROM', '')
             self.report_from_name = settings.get('abuse_report_from_name') or os.environ.get('ABUSE_REPORT_FROM_NAME', 'SIP Honeypot')
+            self.report_org_name = settings.get('abuse_report_org_name') or os.environ.get('ABUSE_REPORT_ORG_NAME', self.report_from_name)
+            self.report_intro = settings.get('abuse_report_intro') or os.environ.get('ABUSE_REPORT_INTRO', f'This is an automated abuse report from the {self.report_org_name} NOC.')
+            self.report_subject_prefix = settings.get('abuse_report_subject_prefix') or os.environ.get('ABUSE_REPORT_SUBJECT_PREFIX', '[X-ARF] SIP/VoIP Attack Report')
             self.cooldown_days = int(settings.get('abuse_report_cooldown_days') or self.DEFAULT_COOLDOWN_DAYS)
 
             logger.info(f"Abuse reporter settings reloaded (SMTP: {self.smtp_host})")
@@ -265,7 +268,7 @@ class AbuseReporter:
 
         report = f"""ABUSE REPORT - SIP/VoIP Attack Activity
 
-This is an automated abuse report from the Snapcom.com NOC.
+{self.report_intro}
 
 ATTACKING IP ADDRESS
 ====================
@@ -459,7 +462,7 @@ Report ID: {ip}-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}
         msg = MIMEMultipart('mixed')
         msg['From'] = f"{self.report_from_name} <{self.smtp_from}>"
         msg['To'] = abuse_email
-        msg['Subject'] = f"[X-ARF] SIP/VoIP Attack Report: {ip}"
+        msg['Subject'] = f"{self.report_subject_prefix}: {ip}"
 
         # X-ARF required headers
         msg['X-XARF'] = 'PLAIN'

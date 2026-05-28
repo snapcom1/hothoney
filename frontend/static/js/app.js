@@ -1406,6 +1406,9 @@ class HoneypotDashboard {
             document.getElementById('smtp_from').value = settings.smtp_from || '';
             document.getElementById('abuse_report_from_name').value = settings.abuse_report_from_name || '';
             document.getElementById('abuse_report_cooldown_days').value = settings.abuse_report_cooldown_days || '7';
+            document.getElementById('abuse_report_org_name').value = settings.abuse_report_org_name || '';
+            document.getElementById('abuse_report_intro').value = settings.abuse_report_intro || '';
+            document.getElementById('abuse_report_subject_prefix').value = settings.abuse_report_subject_prefix || '';
             document.getElementById('auto_block_threshold').value = settings.auto_block_threshold || '3';
             document.getElementById('blocklist_expiry_days').value = settings.blocklist_expiry_days || '60';
 
@@ -1447,6 +1450,9 @@ class HoneypotDashboard {
             smtp_from: document.getElementById('smtp_from').value,
             abuse_report_from_name: document.getElementById('abuse_report_from_name').value,
             abuse_report_cooldown_days: document.getElementById('abuse_report_cooldown_days').value,
+            abuse_report_org_name: document.getElementById('abuse_report_org_name').value,
+            abuse_report_intro: document.getElementById('abuse_report_intro').value,
+            abuse_report_subject_prefix: document.getElementById('abuse_report_subject_prefix').value,
             auto_block_threshold: document.getElementById('auto_block_threshold').value,
             blocklist_expiry_days: document.getElementById('blocklist_expiry_days').value,
             // Tarpit settings
