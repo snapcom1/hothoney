@@ -191,6 +191,25 @@ class ProvisioningHoneypot:
         self.app.router.add_get('/SiPbx/', self.sipbx_index)
         self.app.router.add_get('/SiPbx/login', self.sipbx_login)
         self.app.router.add_post('/SiPbx/login', self.sipbx_login_post)
+        self.app.router.add_get('/SiPbx/adminlogin.php', self.sipbx_admin_login)
+        self.app.router.add_post('/SiPbx/adminlogin.php', self.sipbx_admin_login_post)
+        # Fake authenticated dashboard pages
+        self.app.router.add_get('/SiPbx/dashboard', self.sipbx_dashboard)
+        self.app.router.add_get('/SiPbx/dashboard/', self.sipbx_dashboard)
+        self.app.router.add_get('/SiPbx/dashboard/users', self.sipbx_dashboard_users)
+        self.app.router.add_get('/SiPbx/dashboard/trunks', self.sipbx_dashboard_trunks)
+        self.app.router.add_get('/SiPbx/dashboard/cdr', self.sipbx_dashboard_cdr)
+        self.app.router.add_get('/SiPbx/dashboard/settings', self.sipbx_dashboard_settings)
+        self.app.router.add_post('/SiPbx/dashboard/settings', self.sipbx_dashboard_settings_post)
+        self.app.router.add_get('/SiPbx/dashboard/billing', self.sipbx_dashboard_billing)
+        # NDP fake dashboard
+        self.app.router.add_get('/ndp/dashboard', self.ndp_dashboard)
+        self.app.router.add_get('/ndp/dashboard/', self.ndp_dashboard)
+        self.app.router.add_get('/ndp/dashboard/devices', self.ndp_dashboard_devices)
+        self.app.router.add_get('/ndp/dashboard/users', self.ndp_dashboard_users)
+        self.app.router.add_post('/ndp/dashboard/users', self.ndp_dashboard_users_post)
+        self.app.router.add_get('/ndp/dashboard/config', self.ndp_dashboard_config)
+        self.app.router.add_post('/ndp/dashboard/config', self.ndp_dashboard_config_post)
         self.app.router.add_get('/SiPbx/api/{path:.*}', self.sipbx_api)
         self.app.router.add_post('/SiPbx/api/{path:.*}', self.sipbx_api)
         self.app.router.add_get('/SiPbx/admin', self.sipbx_admin)
@@ -481,18 +500,25 @@ feature_forwarding=yes
         return web.Response(text=html, content_type='text/html')
 
     async def netsapiens_admin_login_post(self, request):
-        """Capture login attempts"""
+        """Capture login attempts with exciting responses"""
+        source_ip = request.remote
+        forwarded = request.headers.get('X-Forwarded-For')
+        if forwarded:
+            source_ip = forwarded.split(',')[0].strip()
+
+        username = ''
+        password = ''
         try:
             data = await request.post()
             username = data.get('username', '')
             password = data.get('password', '')
-            logger.warning(f"CAPTURED CREDENTIALS - NDP Admin: {username}:{password}")
+            logger.warning(f"CAPTURED CREDENTIALS - NDP Admin: {username}:{password} from {source_ip}")
 
             # Log credential capture specifically
             if self.log_callback:
                 cred_entry = {
                     'timestamp': datetime.utcnow().isoformat(),
-                    'source_ip': request.remote,
+                    'source_ip': source_ip,
                     'source_port': 0,
                     'method': 'CREDENTIAL_CAPTURE',
                     'uri': '/ndp/adminlogin.php',
@@ -501,6 +527,7 @@ feature_forwarding=yes
                         'password': password,
                         'type': 'ndp_admin'
                     },
+                    'user_agent': request.headers.get('User-Agent', ''),
                     'protocol': 'HTTP',
                     'honeypot_type': 'provisioning'
                 }
@@ -508,40 +535,85 @@ feature_forwarding=yes
         except:
             pass
 
-        # Always show "invalid credentials" to keep them trying
-        html = """<!DOCTYPE html>
+        # Always "let them in" to the fake dashboard
+        if username and password:
+            logger.warning(f"HONEYPOT LOGIN SUCCESS - NDP: {username} from {source_ip} - redirecting to fake dashboard")
+            if self.log_callback:
+                login_entry = {
+                    'timestamp': datetime.utcnow().isoformat(),
+                    'source_ip': source_ip,
+                    'source_port': 0,
+                    'method': 'HONEYPOT_LOGIN',
+                    'uri': '/ndp/adminlogin.php',
+                    'credentials': {
+                        'username': username,
+                        'password': password,
+                        'type': 'ndp_admin_login_success'
+                    },
+                    'user_agent': request.headers.get('User-Agent', ''),
+                    'protocol': 'HTTP',
+                    'honeypot_type': 'provisioning'
+                }
+                asyncio.create_task(self.log_callback(login_entry))
+            raise web.HTTPFound('/ndp/dashboard')
+
+        # Exciting "almost worked" responses
+        responses = [
+            ('Authentication Failed', 'Invalid username or password. This attempt has been logged.', 'error'),
+            ('Account Suspended', 'This administrator account has been suspended. Contact support.', 'warning'),
+            ('Session Conflict', 'Another admin session is active. Only one session allowed per account.', 'warning'),
+            ('Database Timeout', 'Authentication server timeout. Please try again.', 'warning'),
+            ('IP Restricted', f'Access from IP {source_ip} requires VPN. Connect to corporate VPN first.', 'info'),
+            ('Password Expired', 'Password has expired. Contact system administrator for reset.', 'warning'),
+            ('License Error', 'Admin license limit reached. Upgrade required for additional admin accounts.', 'error'),
+        ]
+
+        title, message, alert_type = random.choice(responses)
+        colors = {'error': ('#ffe6e6', '#cc0000'), 'warning': ('#fff3cd', '#856404'), 'info': ('#cce5ff', '#004085')}
+        bg_color, text_color = colors.get(alert_type, colors['error'])
+
+        html = f"""<!DOCTYPE html>
 <html>
 <head>
-    <title>NDP Admin Login</title>
+    <title>NDP Admin - {title}</title>
     <style>
-        body { font-family: Arial, sans-serif; background: #f4f4f4; margin: 0; padding: 20px; }
-        .login-container { max-width: 400px; margin: 100px auto; background: white; padding: 40px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
-        h1 { color: #333; margin-bottom: 30px; font-size: 24px; }
-        .error { background: #ffe6e6; color: #cc0000; padding: 10px; border-radius: 4px; margin-bottom: 20px; }
-        .form-group { margin-bottom: 20px; }
-        label { display: block; margin-bottom: 5px; color: #666; }
-        input[type="text"], input[type="password"] { width: 100%; padding: 12px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box; }
-        button { width: 100%; padding: 12px; background: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 16px; }
-        button:hover { background: #0056b3; }
-        .footer { text-align: center; margin-top: 20px; color: #999; font-size: 12px; }
+        body {{ font-family: Arial, sans-serif; background: #f4f4f4; margin: 0; padding: 20px; }}
+        .login-container {{ max-width: 400px; margin: 80px auto; background: white; padding: 40px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }}
+        h1 {{ color: #333; margin-bottom: 20px; font-size: 24px; }}
+        .alert {{ background: {bg_color}; color: {text_color}; padding: 15px; border-radius: 4px; margin-bottom: 20px; border-left: 4px solid {text_color}; }}
+        .alert h4 {{ margin: 0 0 5px 0; font-size: 14px; }}
+        .alert p {{ margin: 0; font-size: 13px; }}
+        .form-group {{ margin-bottom: 20px; }}
+        label {{ display: block; margin-bottom: 5px; color: #666; }}
+        input[type="text"], input[type="password"] {{ width: 100%; padding: 12px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box; }}
+        button {{ width: 100%; padding: 12px; background: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 16px; }}
+        button:hover {{ background: #0056b3; }}
+        .footer {{ text-align: center; margin-top: 20px; color: #999; font-size: 12px; }}
+        .log-notice {{ text-align: center; margin-top: 15px; padding: 8px; background: #f8f9fa; border-radius: 4px; font-size: 11px; color: #6c757d; }}
     </style>
 </head>
 <body>
     <div class="login-container">
         <h1>Device Provisioning Admin</h1>
-        <div class="error">Invalid username or password</div>
+        <div class="alert">
+            <h4>{title}</h4>
+            <p>{message}</p>
+        </div>
         <form method="POST" action="/ndp/adminlogin.php">
             <div class="form-group">
                 <label>Username</label>
-                <input type="text" name="username" required>
+                <input type="text" name="username" value="{username}" required>
             </div>
             <div class="form-group">
                 <label>Password</label>
                 <input type="password" name="password" required>
             </div>
-            <button type="submit">Login</button>
+            <button type="submit">Retry Login</button>
         </form>
-        <div class="footer">NetSapiens Device Portal v4.2</div>
+        <div class="log-notice">
+            Attempt logged: {source_ip} @ {datetime.utcnow().strftime('%H:%M:%S')} UTC
+        </div>
+        <div class="footer">NetSapiens Device Portal v4.2.1</div>
     </div>
 </body>
 </html>
@@ -856,9 +928,211 @@ feature_forwarding=yes
 """
         return web.Response(text=html, content_type='text/html')
 
+    async def sipbx_admin_login(self, request):
+        """SiPbx admin login page - enticing design"""
+        html = """<!DOCTYPE html>
+<html>
+<head>
+    <title>SiPbx Admin Console</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: linear-gradient(135deg, #0c0c0c 0%, #1a1a2e 50%, #16213e 100%); min-height: 100vh; display: flex; align-items: center; justify-content: center; }
+        .login-container { width: 100%; max-width: 420px; }
+        .login-box { background: rgba(22, 33, 62, 0.95); padding: 40px; border-radius: 16px; box-shadow: 0 25px 50px rgba(0,0,0,0.5), 0 0 100px rgba(233, 69, 96, 0.1); border: 1px solid rgba(233, 69, 96, 0.2); }
+        .logo { text-align: center; margin-bottom: 30px; }
+        .logo h1 { color: #e94560; font-size: 36px; letter-spacing: 3px; text-shadow: 0 0 20px rgba(233, 69, 96, 0.5); }
+        .logo .admin-badge { display: inline-block; background: linear-gradient(135deg, #e94560, #ff6b6b); color: white; padding: 4px 12px; border-radius: 20px; font-size: 11px; font-weight: 600; letter-spacing: 1px; margin-top: 10px; }
+        .logo p { color: #a0a0a0; font-size: 14px; margin-top: 8px; }
+        .security-notice { background: rgba(234, 179, 8, 0.1); border: 1px solid rgba(234, 179, 8, 0.3); color: #fbbf24; padding: 12px; border-radius: 8px; margin-bottom: 25px; font-size: 12px; text-align: center; }
+        .form-group { margin-bottom: 20px; }
+        .form-group label { display: block; color: #a0a0a0; margin-bottom: 8px; font-size: 14px; font-weight: 500; }
+        .form-group input { width: 100%; padding: 14px 16px; background: #0f0f23; border: 2px solid #2a2a4a; border-radius: 8px; color: #fff; font-size: 16px; transition: all 0.3s; }
+        .form-group input:focus { outline: none; border-color: #e94560; box-shadow: 0 0 20px rgba(233, 69, 96, 0.2); }
+        .form-group input::placeholder { color: #505070; }
+        .btn-login { width: 100%; padding: 14px; background: linear-gradient(135deg, #e94560, #c23a51); border: none; border-radius: 8px; color: #fff; font-size: 16px; font-weight: 600; cursor: pointer; transition: all 0.3s; text-transform: uppercase; letter-spacing: 1px; }
+        .btn-login:hover { transform: translateY(-2px); box-shadow: 0 10px 30px rgba(233, 69, 96, 0.4); }
+        .server-info { display: flex; justify-content: space-between; margin-top: 25px; padding: 15px; background: #0f0f23; border-radius: 8px; }
+        .server-info .item { text-align: center; }
+        .server-info .label { color: #505070; font-size: 10px; text-transform: uppercase; letter-spacing: 1px; }
+        .server-info .value { color: #4ade80; font-family: monospace; font-size: 12px; margin-top: 4px; }
+        .footer { text-align: center; margin-top: 20px; color: #505070; font-size: 11px; }
+        .pulse { animation: pulse 2s infinite; }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+    </style>
+</head>
+<body>
+    <div class="login-container">
+        <div class="login-box">
+            <div class="logo">
+                <h1>SiPbx</h1>
+                <span class="admin-badge">ADMIN CONSOLE</span>
+                <p>System Administration Portal</p>
+            </div>
+            <div class="security-notice">
+                <span class="pulse">&#128274;</span> Secure Connection Required - All access is logged
+            </div>
+            <form method="POST" action="/SiPbx/adminlogin.php">
+                <div class="form-group">
+                    <label>Administrator Username</label>
+                    <input type="text" name="username" placeholder="admin" required autocomplete="off">
+                </div>
+                <div class="form-group">
+                    <label>Password</label>
+                    <input type="password" name="password" placeholder="Enter admin password" required>
+                </div>
+                <button type="submit" class="btn-login">Authenticate</button>
+            </form>
+            <div class="server-info">
+                <div class="item">
+                    <div class="label">Server</div>
+                    <div class="value">core1-stl</div>
+                </div>
+                <div class="item">
+                    <div class="label">Status</div>
+                    <div class="value" style="color: #4ade80;">● Online</div>
+                </div>
+                <div class="item">
+                    <div class="label">Version</div>
+                    <div class="value">v5.2.1</div>
+                </div>
+            </div>
+            <div class="footer">
+                &copy; 2024 Snapcom SiPbx | Enterprise VoIP Platform
+            </div>
+        </div>
+    </div>
+</body>
+</html>
+"""
+        return web.Response(text=html, content_type='text/html')
+
+    async def sipbx_admin_login_post(self, request):
+        """Capture SiPbx admin login attempts - sometimes let them 'in' to fake dashboard"""
+        source_ip = request.remote
+        forwarded = request.headers.get('X-Forwarded-For')
+        if forwarded:
+            source_ip = forwarded.split(',')[0].strip()
+
+        username = ''
+        password = ''
+        try:
+            data = await request.post()
+            username = data.get('username', '')
+            password = data.get('password', '')
+            logger.warning(f"CAPTURED ADMIN CREDS - SiPbx Admin: {username}:{password} from {source_ip}")
+
+            if self.log_callback:
+                cred_entry = {
+                    'timestamp': datetime.utcnow().isoformat(),
+                    'source_ip': source_ip,
+                    'source_port': 0,
+                    'method': 'CREDENTIAL_CAPTURE',
+                    'uri': '/SiPbx/adminlogin.php',
+                    'credentials': {
+                        'username': username,
+                        'password': password,
+                        'type': 'sipbx_admin_console'
+                    },
+                    'user_agent': request.headers.get('User-Agent', ''),
+                    'protocol': 'HTTP',
+                    'honeypot_type': 'provisioning'
+                }
+                asyncio.create_task(self.log_callback(cred_entry))
+        except:
+            pass
+
+        # Always "let them in" to the fake dashboard
+        if username and password:
+            logger.warning(f"HONEYPOT LOGIN SUCCESS - SiPbx: {username} from {source_ip} - redirecting to fake dashboard")
+            if self.log_callback:
+                login_entry = {
+                    'timestamp': datetime.utcnow().isoformat(),
+                    'source_ip': source_ip,
+                    'source_port': 0,
+                    'method': 'HONEYPOT_LOGIN',
+                    'uri': '/SiPbx/adminlogin.php',
+                    'credentials': {
+                        'username': username,
+                        'password': password,
+                        'type': 'sipbx_admin_login_success'
+                    },
+                    'user_agent': request.headers.get('User-Agent', ''),
+                    'protocol': 'HTTP',
+                    'honeypot_type': 'provisioning'
+                }
+                asyncio.create_task(self.log_callback(login_entry))
+            # Redirect to fake dashboard
+            raise web.HTTPFound('/SiPbx/dashboard')
+
+        # Show exciting "almost worked" responses to keep them trying
+        responses = [
+            ('Account locked', 'Too many failed attempts. Account temporarily locked. Try again in 5 minutes.', '#ef4444'),
+            ('Authentication Failed', 'Invalid credentials. Attempt logged.', '#ef4444'),
+            ('Session Expired', 'Your session token has expired. Please try again.', '#f59e0b'),
+            ('2FA Required', 'Two-factor authentication required for this account. Check your authenticator app.', '#3b82f6'),
+            ('IP Not Whitelisted', f'Access from {source_ip} is not authorized. Contact system administrator.', '#f59e0b'),
+            ('Maintenance Mode', 'Admin console is currently in maintenance mode. Please try again later.', '#8b5cf6'),
+        ]
+
+        title, message, color = random.choice(responses)
+
+        html = f"""<!DOCTYPE html>
+<html>
+<head>
+    <title>SiPbx Admin - {title}</title>
+    <style>
+        * {{ box-sizing: border-box; margin: 0; padding: 0; }}
+        body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: linear-gradient(135deg, #0c0c0c 0%, #1a1a2e 50%, #16213e 100%); min-height: 100vh; display: flex; align-items: center; justify-content: center; }}
+        .login-box {{ background: rgba(22, 33, 62, 0.95); padding: 40px; border-radius: 16px; box-shadow: 0 25px 50px rgba(0,0,0,0.5); width: 100%; max-width: 420px; border: 1px solid rgba(233, 69, 96, 0.2); }}
+        .logo {{ text-align: center; margin-bottom: 20px; }}
+        .logo h1 {{ color: #e94560; font-size: 32px; letter-spacing: 2px; }}
+        .alert {{ background: {color}22; border: 1px solid {color}; color: {color}; padding: 16px; border-radius: 8px; margin-bottom: 25px; text-align: center; }}
+        .alert h3 {{ margin-bottom: 8px; font-size: 16px; }}
+        .alert p {{ font-size: 13px; opacity: 0.9; }}
+        .form-group {{ margin-bottom: 20px; }}
+        .form-group label {{ display: block; color: #a0a0a0; margin-bottom: 8px; font-size: 14px; }}
+        .form-group input {{ width: 100%; padding: 14px 16px; background: #0f0f23; border: 2px solid #2a2a4a; border-radius: 8px; color: #fff; font-size: 16px; }}
+        .form-group input:focus {{ outline: none; border-color: #e94560; }}
+        .btn-login {{ width: 100%; padding: 14px; background: linear-gradient(135deg, #e94560, #c23a51); border: none; border-radius: 8px; color: #fff; font-size: 16px; font-weight: 600; cursor: pointer; }}
+        .btn-login:hover {{ opacity: 0.9; }}
+        .footer {{ text-align: center; margin-top: 25px; color: #505070; font-size: 11px; }}
+        .attempt-info {{ text-align: center; margin-top: 15px; padding: 10px; background: #0f0f23; border-radius: 8px; font-size: 11px; color: #505070; }}
+    </style>
+</head>
+<body>
+    <div class="login-box">
+        <div class="logo">
+            <h1>SiPbx</h1>
+        </div>
+        <div class="alert">
+            <h3>{title}</h3>
+            <p>{message}</p>
+        </div>
+        <form method="POST" action="/SiPbx/adminlogin.php">
+            <div class="form-group">
+                <label>Administrator Username</label>
+                <input type="text" name="username" value="{username}" required autocomplete="off">
+            </div>
+            <div class="form-group">
+                <label>Password</label>
+                <input type="password" name="password" required>
+            </div>
+            <button type="submit" class="btn-login">Retry Authentication</button>
+        </form>
+        <div class="attempt-info">
+            Last attempt from {source_ip} logged at {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')} UTC
+        </div>
+        <div class="footer">&copy; 2024 Snapcom SiPbx v5.2.1</div>
+    </div>
+</body>
+</html>
+"""
+        return web.Response(text=html, content_type='text/html')
+
     async def sipbx_admin(self, request):
         """SiPbx admin - require auth"""
-        raise web.HTTPFound('/SiPbx/login')
+        raise web.HTTPFound('/SiPbx/adminlogin.php')
 
     async def sipbx_api(self, request):
         """SiPbx API endpoint - capture API probing"""
@@ -903,6 +1177,826 @@ feature_forwarding=yes
             raise web.HTTPFound('/SiPbx/login')
 
         return web.Response(text="Not Found", status=404)
+
+    # ============== FAKE DASHBOARD HANDLERS ==============
+
+    def _dashboard_base_style(self):
+        """Common dashboard styles"""
+        return """
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #1a1a2e; color: #e0e0e0; }
+        .sidebar { position: fixed; left: 0; top: 0; width: 250px; height: 100vh; background: #16213e; padding: 20px 0; border-right: 1px solid #2a2a4a; }
+        .sidebar h2 { color: #e94560; padding: 0 20px 20px; font-size: 22px; border-bottom: 1px solid #2a2a4a; margin-bottom: 20px; }
+        .sidebar nav a { display: block; padding: 12px 20px; color: #a0a0a0; text-decoration: none; border-left: 3px solid transparent; transition: all 0.2s; }
+        .sidebar nav a:hover, .sidebar nav a.active { background: rgba(233, 69, 96, 0.1); color: #e94560; border-left-color: #e94560; }
+        .sidebar nav a .icon { margin-right: 10px; }
+        .main { margin-left: 250px; padding: 30px; }
+        .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 30px; padding-bottom: 20px; border-bottom: 1px solid #2a2a4a; }
+        .header h1 { font-size: 24px; color: #fff; }
+        .header .user-info { color: #a0a0a0; font-size: 14px; }
+        .stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; margin-bottom: 30px; }
+        .stat-card { background: #16213e; padding: 25px; border-radius: 12px; border: 1px solid #2a2a4a; }
+        .stat-card .label { color: #a0a0a0; font-size: 13px; text-transform: uppercase; letter-spacing: 1px; }
+        .stat-card .value { font-size: 32px; font-weight: 600; color: #fff; margin-top: 8px; }
+        .stat-card .change { font-size: 12px; margin-top: 5px; }
+        .stat-card .change.up { color: #4ade80; }
+        .stat-card .change.down { color: #ef4444; }
+        .card { background: #16213e; border-radius: 12px; border: 1px solid #2a2a4a; margin-bottom: 20px; }
+        .card-header { padding: 20px; border-bottom: 1px solid #2a2a4a; font-weight: 600; display: flex; justify-content: space-between; align-items: center; }
+        .card-body { padding: 20px; }
+        table { width: 100%; border-collapse: collapse; }
+        th, td { padding: 12px 15px; text-align: left; border-bottom: 1px solid #2a2a4a; }
+        th { color: #a0a0a0; font-weight: 500; font-size: 12px; text-transform: uppercase; letter-spacing: 1px; }
+        tr:hover { background: rgba(233, 69, 96, 0.05); }
+        .badge { display: inline-block; padding: 4px 10px; border-radius: 20px; font-size: 11px; font-weight: 600; }
+        .badge-success { background: rgba(74, 222, 128, 0.2); color: #4ade80; }
+        .badge-warning { background: rgba(251, 191, 36, 0.2); color: #fbbf24; }
+        .badge-danger { background: rgba(239, 68, 68, 0.2); color: #ef4444; }
+        .btn { padding: 8px 16px; border-radius: 6px; border: none; cursor: pointer; font-size: 13px; font-weight: 500; transition: all 0.2s; }
+        .btn-primary { background: #e94560; color: white; }
+        .btn-primary:hover { background: #d13a54; }
+        .btn-secondary { background: #2a2a4a; color: #e0e0e0; }
+        .form-group { margin-bottom: 20px; }
+        .form-group label { display: block; margin-bottom: 8px; color: #a0a0a0; font-size: 14px; }
+        .form-group input, .form-group select, .form-group textarea { width: 100%; padding: 12px; background: #0f0f23; border: 1px solid #2a2a4a; border-radius: 6px; color: #fff; font-size: 14px; }
+        .form-group input:focus, .form-group select:focus { outline: none; border-color: #e94560; }
+        """
+
+    async def _log_dashboard_action(self, request, action, details=None):
+        """Log any dashboard action"""
+        source_ip = request.remote
+        forwarded = request.headers.get('X-Forwarded-For')
+        if forwarded:
+            source_ip = forwarded.split(',')[0].strip()
+
+        logger.warning(f"DASHBOARD ACTION - {action} from {source_ip}: {details}")
+
+        if self.log_callback:
+            entry = {
+                'timestamp': datetime.utcnow().isoformat(),
+                'source_ip': source_ip,
+                'source_port': 0,
+                'method': 'DASHBOARD_ACTION',
+                'uri': request.path,
+                'action': action,
+                'details': details,
+                'user_agent': request.headers.get('User-Agent', ''),
+                'protocol': 'HTTP',
+                'honeypot_type': 'provisioning'
+            }
+            asyncio.create_task(self.log_callback(entry))
+
+    async def sipbx_dashboard(self, request):
+        """Fake SiPbx admin dashboard"""
+        await self._log_dashboard_action(request, 'VIEW_DASHBOARD', {'page': 'main'})
+
+        html = f"""<!DOCTYPE html>
+<html>
+<head>
+    <title>SiPbx Admin Dashboard</title>
+    <style>{self._dashboard_base_style()}</style>
+</head>
+<body>
+    <div class="sidebar">
+        <h2>SiPbx Admin</h2>
+        <nav>
+            <a href="/SiPbx/dashboard" class="active"><span class="icon">📊</span> Dashboard</a>
+            <a href="/SiPbx/dashboard/users"><span class="icon">👥</span> Users & Extensions</a>
+            <a href="/SiPbx/dashboard/trunks"><span class="icon">📞</span> SIP Trunks</a>
+            <a href="/SiPbx/dashboard/cdr"><span class="icon">📋</span> Call Records</a>
+            <a href="/SiPbx/dashboard/billing"><span class="icon">💳</span> Billing</a>
+            <a href="/SiPbx/dashboard/settings"><span class="icon">⚙️</span> System Settings</a>
+            <a href="/SiPbx/adminlogin.php" style="margin-top: 30px; color: #ef4444;"><span class="icon">🚪</span> Logout</a>
+        </nav>
+    </div>
+    <div class="main">
+        <div class="header">
+            <h1>System Dashboard</h1>
+            <div class="user-info">Logged in as: admin | Server: core1-stl.snapcom.com</div>
+        </div>
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div class="label">Active Extensions</div>
+                <div class="value">2,847</div>
+                <div class="change up">↑ 12% from last month</div>
+            </div>
+            <div class="stat-card">
+                <div class="label">Active Calls</div>
+                <div class="value">156</div>
+                <div class="change up">↑ 23 in last hour</div>
+            </div>
+            <div class="stat-card">
+                <div class="label">SIP Trunks</div>
+                <div class="value">24</div>
+                <div class="change">All operational</div>
+            </div>
+            <div class="stat-card">
+                <div class="label">Monthly Revenue</div>
+                <div class="value">$48,392</div>
+                <div class="change up">↑ 8% from last month</div>
+            </div>
+        </div>
+        <div class="card">
+            <div class="card-header">Recent Activity</div>
+            <div class="card-body">
+                <table>
+                    <thead><tr><th>Time</th><th>Event</th><th>User</th><th>Details</th></tr></thead>
+                    <tbody>
+                        <tr><td>2 min ago</td><td>Extension Created</td><td>admin</td><td>Ext 1847 - John Smith</td></tr>
+                        <tr><td>15 min ago</td><td>Trunk Modified</td><td>admin</td><td>Updated outbound routes</td></tr>
+                        <tr><td>1 hour ago</td><td>Bulk Import</td><td>system</td><td>Imported 50 DIDs</td></tr>
+                        <tr><td>3 hours ago</td><td>Config Backup</td><td>cron</td><td>Daily backup completed</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</body>
+</html>
+"""
+        return web.Response(text=html, content_type='text/html')
+
+    async def sipbx_dashboard_users(self, request):
+        """Fake users list with enticing data"""
+        await self._log_dashboard_action(request, 'VIEW_USERS', {'page': 'users_list'})
+
+        # Generate fake users
+        fake_users = [
+            ('1001', 'John Smith', 'jsmith', 'Acme Corp', 'active', '$45.00'),
+            ('1002', 'Sarah Johnson', 'sjohnson', 'Acme Corp', 'active', '$45.00'),
+            ('1003', 'Mike Williams', 'mwilliams', 'TechStart Inc', 'active', '$35.00'),
+            ('1004', 'Emily Davis', 'edavis', 'TechStart Inc', 'active', '$35.00'),
+            ('1005', 'Robert Brown', 'rbrown', 'Global Services', 'suspended', '$55.00'),
+            ('1006', 'Lisa Anderson', 'landerson', 'Global Services', 'active', '$55.00'),
+            ('1007', 'David Wilson', 'dwilson', 'Smith & Co', 'active', '$40.00'),
+            ('1008', 'Jennifer Taylor', 'jtaylor', 'Smith & Co', 'active', '$40.00'),
+        ]
+
+        rows = ""
+        for ext, name, user, company, status, rate in fake_users:
+            badge = 'badge-success' if status == 'active' else 'badge-danger'
+            rows += f"<tr><td>{ext}</td><td>{name}</td><td>{user}</td><td>{company}</td><td><span class='badge {badge}'>{status}</span></td><td>{rate}</td><td><button class='btn btn-secondary'>Edit</button></td></tr>"
+
+        html = f"""<!DOCTYPE html>
+<html>
+<head>
+    <title>Users & Extensions - SiPbx</title>
+    <style>{self._dashboard_base_style()}</style>
+</head>
+<body>
+    <div class="sidebar">
+        <h2>SiPbx Admin</h2>
+        <nav>
+            <a href="/SiPbx/dashboard"><span class="icon">📊</span> Dashboard</a>
+            <a href="/SiPbx/dashboard/users" class="active"><span class="icon">👥</span> Users & Extensions</a>
+            <a href="/SiPbx/dashboard/trunks"><span class="icon">📞</span> SIP Trunks</a>
+            <a href="/SiPbx/dashboard/cdr"><span class="icon">📋</span> Call Records</a>
+            <a href="/SiPbx/dashboard/billing"><span class="icon">💳</span> Billing</a>
+            <a href="/SiPbx/dashboard/settings"><span class="icon">⚙️</span> System Settings</a>
+        </nav>
+    </div>
+    <div class="main">
+        <div class="header">
+            <h1>Users & Extensions</h1>
+            <button class="btn btn-primary">+ Add User</button>
+        </div>
+        <div class="card">
+            <div class="card-header">
+                <span>All Users (2,847 total)</span>
+                <input type="text" placeholder="Search users..." style="padding: 8px 12px; background: #0f0f23; border: 1px solid #2a2a4a; border-radius: 6px; color: #fff;">
+            </div>
+            <div class="card-body">
+                <table>
+                    <thead><tr><th>Extension</th><th>Name</th><th>Username</th><th>Company</th><th>Status</th><th>Rate</th><th>Actions</th></tr></thead>
+                    <tbody>{rows}</tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</body>
+</html>
+"""
+        return web.Response(text=html, content_type='text/html')
+
+    async def sipbx_dashboard_trunks(self, request):
+        """Fake SIP trunks page"""
+        await self._log_dashboard_action(request, 'VIEW_TRUNKS', {'page': 'sip_trunks'})
+
+        html = f"""<!DOCTYPE html>
+<html>
+<head>
+    <title>SIP Trunks - SiPbx</title>
+    <style>{self._dashboard_base_style()}</style>
+</head>
+<body>
+    <div class="sidebar">
+        <h2>SiPbx Admin</h2>
+        <nav>
+            <a href="/SiPbx/dashboard"><span class="icon">📊</span> Dashboard</a>
+            <a href="/SiPbx/dashboard/users"><span class="icon">👥</span> Users & Extensions</a>
+            <a href="/SiPbx/dashboard/trunks" class="active"><span class="icon">📞</span> SIP Trunks</a>
+            <a href="/SiPbx/dashboard/cdr"><span class="icon">📋</span> Call Records</a>
+            <a href="/SiPbx/dashboard/billing"><span class="icon">💳</span> Billing</a>
+            <a href="/SiPbx/dashboard/settings"><span class="icon">⚙️</span> System Settings</a>
+        </nav>
+    </div>
+    <div class="main">
+        <div class="header">
+            <h1>SIP Trunks</h1>
+            <button class="btn btn-primary">+ Add Trunk</button>
+        </div>
+        <div class="card">
+            <div class="card-body">
+                <table>
+                    <thead><tr><th>Trunk Name</th><th>Provider</th><th>Host</th><th>Username</th><th>Channels</th><th>Status</th></tr></thead>
+                    <tbody>
+                        <tr><td>Primary Outbound</td><td>Bandwidth</td><td>sip.bandwidth.com</td><td>snapcom_prod</td><td>100</td><td><span class="badge badge-success">Online</span></td></tr>
+                        <tr><td>Backup Outbound</td><td>Telnyx</td><td>sip.telnyx.com</td><td>snap_backup</td><td>50</td><td><span class="badge badge-success">Online</span></td></tr>
+                        <tr><td>International</td><td>VoIP.ms</td><td>chicago.voip.ms</td><td>snapcom_intl</td><td>25</td><td><span class="badge badge-success">Online</span></td></tr>
+                        <tr><td>Toll-Free Inbound</td><td>Bandwidth</td><td>sip.bandwidth.com</td><td>snap_tollfree</td><td>200</td><td><span class="badge badge-success">Online</span></td></tr>
+                        <tr><td>E911 Trunk</td><td>Intrado</td><td>e911.intrado.com</td><td>snap_e911</td><td>10</td><td><span class="badge badge-warning">Standby</span></td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</body>
+</html>
+"""
+        return web.Response(text=html, content_type='text/html')
+
+    async def sipbx_dashboard_cdr(self, request):
+        """Fake call detail records"""
+        await self._log_dashboard_action(request, 'VIEW_CDR', {'page': 'call_records'})
+
+        html = f"""<!DOCTYPE html>
+<html>
+<head>
+    <title>Call Records - SiPbx</title>
+    <style>{self._dashboard_base_style()}</style>
+</head>
+<body>
+    <div class="sidebar">
+        <h2>SiPbx Admin</h2>
+        <nav>
+            <a href="/SiPbx/dashboard"><span class="icon">📊</span> Dashboard</a>
+            <a href="/SiPbx/dashboard/users"><span class="icon">👥</span> Users & Extensions</a>
+            <a href="/SiPbx/dashboard/trunks"><span class="icon">📞</span> SIP Trunks</a>
+            <a href="/SiPbx/dashboard/cdr" class="active"><span class="icon">📋</span> Call Records</a>
+            <a href="/SiPbx/dashboard/billing"><span class="icon">💳</span> Billing</a>
+            <a href="/SiPbx/dashboard/settings"><span class="icon">⚙️</span> System Settings</a>
+        </nav>
+    </div>
+    <div class="main">
+        <div class="header">
+            <h1>Call Detail Records</h1>
+            <button class="btn btn-primary">Export CSV</button>
+        </div>
+        <div class="card">
+            <div class="card-header">
+                <span>Recent Calls (showing last 100)</span>
+                <div>
+                    <input type="date" style="padding: 8px; background: #0f0f23; border: 1px solid #2a2a4a; border-radius: 6px; color: #fff;">
+                    <button class="btn btn-secondary">Filter</button>
+                </div>
+            </div>
+            <div class="card-body">
+                <table>
+                    <thead><tr><th>Time</th><th>From</th><th>To</th><th>Duration</th><th>Cost</th><th>Status</th></tr></thead>
+                    <tbody>
+                        <tr><td>10:45:23</td><td>1001 (John Smith)</td><td>+1-555-123-4567</td><td>4:32</td><td>$0.12</td><td><span class="badge badge-success">Completed</span></td></tr>
+                        <tr><td>10:42:11</td><td>+1-800-555-1234</td><td>1002 (Sarah Johnson)</td><td>12:45</td><td>$0.00</td><td><span class="badge badge-success">Completed</span></td></tr>
+                        <tr><td>10:38:55</td><td>1003 (Mike Williams)</td><td>+44-20-7946-0958</td><td>8:21</td><td>$2.45</td><td><span class="badge badge-success">Completed</span></td></tr>
+                        <tr><td>10:35:02</td><td>1001 (John Smith)</td><td>1005 (Robert Brown)</td><td>0:45</td><td>$0.00</td><td><span class="badge badge-danger">Failed</span></td></tr>
+                        <tr><td>10:32:18</td><td>+1-312-555-9876</td><td>1004 (Emily Davis)</td><td>3:12</td><td>$0.00</td><td><span class="badge badge-success">Completed</span></td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</body>
+</html>
+"""
+        return web.Response(text=html, content_type='text/html')
+
+    async def sipbx_dashboard_billing(self, request):
+        """Fake billing page with credit card form"""
+        await self._log_dashboard_action(request, 'VIEW_BILLING', {'page': 'billing'})
+
+        html = f"""<!DOCTYPE html>
+<html>
+<head>
+    <title>Billing - SiPbx</title>
+    <style>{self._dashboard_base_style()}</style>
+</head>
+<body>
+    <div class="sidebar">
+        <h2>SiPbx Admin</h2>
+        <nav>
+            <a href="/SiPbx/dashboard"><span class="icon">📊</span> Dashboard</a>
+            <a href="/SiPbx/dashboard/users"><span class="icon">👥</span> Users & Extensions</a>
+            <a href="/SiPbx/dashboard/trunks"><span class="icon">📞</span> SIP Trunks</a>
+            <a href="/SiPbx/dashboard/cdr"><span class="icon">📋</span> Call Records</a>
+            <a href="/SiPbx/dashboard/billing" class="active"><span class="icon">💳</span> Billing</a>
+            <a href="/SiPbx/dashboard/settings"><span class="icon">⚙️</span> System Settings</a>
+        </nav>
+    </div>
+    <div class="main">
+        <div class="header">
+            <h1>Billing & Payments</h1>
+        </div>
+        <div class="stats-grid" style="grid-template-columns: repeat(3, 1fr);">
+            <div class="stat-card">
+                <div class="label">Current Balance</div>
+                <div class="value">$1,247.83</div>
+            </div>
+            <div class="stat-card">
+                <div class="label">This Month Usage</div>
+                <div class="value">$892.45</div>
+            </div>
+            <div class="stat-card">
+                <div class="label">Payment Due</div>
+                <div class="value" style="color: #fbbf24;">Feb 28, 2026</div>
+            </div>
+        </div>
+        <div class="card">
+            <div class="card-header">Payment Method</div>
+            <div class="card-body">
+                <form method="POST" action="/SiPbx/dashboard/settings">
+                    <div class="form-group">
+                        <label>Card Number</label>
+                        <input type="text" name="card_number" placeholder="4242 4242 4242 4242">
+                    </div>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+                        <div class="form-group">
+                            <label>Expiry Date</label>
+                            <input type="text" name="card_expiry" placeholder="MM/YY">
+                        </div>
+                        <div class="form-group">
+                            <label>CVV</label>
+                            <input type="text" name="card_cvv" placeholder="123">
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label>Billing Address</label>
+                        <input type="text" name="billing_address" placeholder="123 Main St, City, State ZIP">
+                    </div>
+                    <button type="submit" class="btn btn-primary">Update Payment Method</button>
+                </form>
+            </div>
+        </div>
+    </div>
+</body>
+</html>
+"""
+        return web.Response(text=html, content_type='text/html')
+
+    async def sipbx_dashboard_settings(self, request):
+        """Fake system settings"""
+        await self._log_dashboard_action(request, 'VIEW_SETTINGS', {'page': 'system_settings'})
+
+        html = f"""<!DOCTYPE html>
+<html>
+<head>
+    <title>System Settings - SiPbx</title>
+    <style>{self._dashboard_base_style()}</style>
+</head>
+<body>
+    <div class="sidebar">
+        <h2>SiPbx Admin</h2>
+        <nav>
+            <a href="/SiPbx/dashboard"><span class="icon">📊</span> Dashboard</a>
+            <a href="/SiPbx/dashboard/users"><span class="icon">👥</span> Users & Extensions</a>
+            <a href="/SiPbx/dashboard/trunks"><span class="icon">📞</span> SIP Trunks</a>
+            <a href="/SiPbx/dashboard/cdr"><span class="icon">📋</span> Call Records</a>
+            <a href="/SiPbx/dashboard/billing"><span class="icon">💳</span> Billing</a>
+            <a href="/SiPbx/dashboard/settings" class="active"><span class="icon">⚙️</span> System Settings</a>
+        </nav>
+    </div>
+    <div class="main">
+        <div class="header">
+            <h1>System Settings</h1>
+        </div>
+        <div class="card">
+            <div class="card-header">SIP Server Configuration</div>
+            <div class="card-body">
+                <form method="POST" action="/SiPbx/dashboard/settings">
+                    <div class="form-group">
+                        <label>SIP Domain</label>
+                        <input type="text" name="sip_domain" value="sip.snapcom.com">
+                    </div>
+                    <div class="form-group">
+                        <label>External IP</label>
+                        <input type="text" name="external_ip" value="198.51.100.50">
+                    </div>
+                    <div class="form-group">
+                        <label>RTP Port Range</label>
+                        <input type="text" name="rtp_ports" value="10000-20000">
+                    </div>
+                    <div class="form-group">
+                        <label>STUN Server</label>
+                        <input type="text" name="stun_server" value="stun.snapcom.com:3478">
+                    </div>
+                    <button type="submit" class="btn btn-primary">Save Configuration</button>
+                </form>
+            </div>
+        </div>
+        <div class="card">
+            <div class="card-header">Admin Credentials</div>
+            <div class="card-body">
+                <form method="POST" action="/SiPbx/dashboard/settings">
+                    <div class="form-group">
+                        <label>Current Password</label>
+                        <input type="password" name="current_password">
+                    </div>
+                    <div class="form-group">
+                        <label>New Password</label>
+                        <input type="password" name="new_password">
+                    </div>
+                    <div class="form-group">
+                        <label>Confirm New Password</label>
+                        <input type="password" name="confirm_password">
+                    </div>
+                    <button type="submit" class="btn btn-primary">Change Password</button>
+                </form>
+            </div>
+        </div>
+    </div>
+</body>
+</html>
+"""
+        return web.Response(text=html, content_type='text/html')
+
+    async def sipbx_dashboard_settings_post(self, request):
+        """Capture any settings form submission"""
+        source_ip = request.remote
+        forwarded = request.headers.get('X-Forwarded-For')
+        if forwarded:
+            source_ip = forwarded.split(',')[0].strip()
+
+        try:
+            data = await request.post()
+            form_data = {k: v for k, v in data.items()}
+            logger.warning(f"CAPTURED FORM DATA - SiPbx Settings from {source_ip}: {form_data}")
+
+            if self.log_callback:
+                entry = {
+                    'timestamp': datetime.utcnow().isoformat(),
+                    'source_ip': source_ip,
+                    'source_port': 0,
+                    'method': 'FORM_SUBMISSION',
+                    'uri': '/SiPbx/dashboard/settings',
+                    'form_data': form_data,
+                    'user_agent': request.headers.get('User-Agent', ''),
+                    'protocol': 'HTTP',
+                    'honeypot_type': 'provisioning'
+                }
+                asyncio.create_task(self.log_callback(entry))
+        except:
+            pass
+
+        # Show success message to encourage more interaction
+        html = """<!DOCTYPE html>
+<html><head><title>Settings Saved</title>
+<style>body{font-family:Arial;background:#1a1a2e;color:#fff;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;}
+.msg{background:#16213e;padding:40px;border-radius:12px;text-align:center;border:1px solid #4ade80;}
+h2{color:#4ade80;margin-bottom:15px;}</style></head>
+<body><div class="msg"><h2>✓ Settings Saved Successfully</h2><p>Your changes have been applied.</p><br><a href="/SiPbx/dashboard" style="color:#e94560;">Return to Dashboard</a></div></body></html>
+"""
+        return web.Response(text=html, content_type='text/html')
+
+    # NDP Dashboard handlers
+    async def ndp_dashboard(self, request):
+        """Fake NDP admin dashboard"""
+        await self._log_dashboard_action(request, 'VIEW_DASHBOARD', {'page': 'ndp_main'})
+
+        html = """<!DOCTYPE html>
+<html>
+<head>
+    <title>NDP Admin Dashboard</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: Arial, sans-serif; background: #f5f5f5; }
+        .header { background: #2c3e50; color: white; padding: 15px 30px; display: flex; justify-content: space-between; align-items: center; }
+        .header h1 { font-size: 20px; }
+        .nav { background: #34495e; padding: 0 30px; }
+        .nav a { display: inline-block; padding: 15px 20px; color: #ecf0f1; text-decoration: none; }
+        .nav a:hover, .nav a.active { background: #2c3e50; }
+        .main { padding: 30px; }
+        .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; margin-bottom: 30px; }
+        .stat-box { background: white; padding: 25px; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
+        .stat-box h3 { color: #7f8c8d; font-size: 14px; margin-bottom: 10px; }
+        .stat-box .num { font-size: 32px; font-weight: bold; color: #2c3e50; }
+        .card { background: white; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); margin-bottom: 20px; }
+        .card-header { padding: 20px; border-bottom: 1px solid #eee; font-weight: bold; }
+        .card-body { padding: 20px; }
+        table { width: 100%; border-collapse: collapse; }
+        th, td { padding: 12px; text-align: left; border-bottom: 1px solid #eee; }
+        th { background: #f8f9fa; }
+        .badge { padding: 5px 10px; border-radius: 20px; font-size: 12px; }
+        .badge-online { background: #d4edda; color: #155724; }
+        .badge-offline { background: #f8d7da; color: #721c24; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>NetSapiens Device Portal - Admin</h1>
+        <div>admin@company.com | <a href="/ndp/adminlogin.php" style="color:#e74c3c;">Logout</a></div>
+    </div>
+    <div class="nav">
+        <a href="/ndp/dashboard" class="active">Dashboard</a>
+        <a href="/ndp/dashboard/devices">Devices</a>
+        <a href="/ndp/dashboard/users">Users</a>
+        <a href="/ndp/dashboard/config">Configuration</a>
+    </div>
+    <div class="main">
+        <div class="stats">
+            <div class="stat-box"><h3>Total Devices</h3><div class="num">1,847</div></div>
+            <div class="stat-box"><h3>Online Now</h3><div class="num" style="color:#27ae60;">1,623</div></div>
+            <div class="stat-box"><h3>Pending Provision</h3><div class="num" style="color:#f39c12;">48</div></div>
+            <div class="stat-box"><h3>Failed Devices</h3><div class="num" style="color:#e74c3c;">12</div></div>
+        </div>
+        <div class="card">
+            <div class="card-header">Recent Device Activity</div>
+            <div class="card-body">
+                <table>
+                    <tr><th>Time</th><th>MAC Address</th><th>Model</th><th>Action</th><th>Status</th></tr>
+                    <tr><td>2 min ago</td><td>00:15:65:A1:B2:C3</td><td>Polycom VVX 500</td><td>Provisioned</td><td><span class="badge badge-online">Online</span></td></tr>
+                    <tr><td>8 min ago</td><td>00:04:F2:D4:E5:F6</td><td>Yealink T46S</td><td>Config Update</td><td><span class="badge badge-online">Online</span></td></tr>
+                    <tr><td>15 min ago</td><td>00:0B:82:G7:H8:I9</td><td>Grandstream GXP2170</td><td>Registered</td><td><span class="badge badge-online">Online</span></td></tr>
+                    <tr><td>1 hour ago</td><td>00:15:65:J0:K1:L2</td><td>Polycom VVX 400</td><td>Firmware Update</td><td><span class="badge badge-offline">Rebooting</span></td></tr>
+                </table>
+            </div>
+        </div>
+    </div>
+</body>
+</html>
+"""
+        return web.Response(text=html, content_type='text/html')
+
+    async def ndp_dashboard_devices(self, request):
+        """Fake NDP devices list"""
+        await self._log_dashboard_action(request, 'VIEW_DEVICES', {'page': 'ndp_devices'})
+
+        html = """<!DOCTYPE html>
+<html>
+<head>
+    <title>Devices - NDP Admin</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: Arial, sans-serif; background: #f5f5f5; }
+        .header { background: #2c3e50; color: white; padding: 15px 30px; }
+        .nav { background: #34495e; padding: 0 30px; }
+        .nav a { display: inline-block; padding: 15px 20px; color: #ecf0f1; text-decoration: none; }
+        .nav a:hover, .nav a.active { background: #2c3e50; }
+        .main { padding: 30px; }
+        .card { background: white; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
+        .card-header { padding: 20px; border-bottom: 1px solid #eee; display: flex; justify-content: space-between; }
+        .card-body { padding: 20px; }
+        table { width: 100%; border-collapse: collapse; }
+        th, td { padding: 12px; text-align: left; border-bottom: 1px solid #eee; }
+        .btn { padding: 8px 16px; border: none; border-radius: 4px; cursor: pointer; }
+        .btn-primary { background: #3498db; color: white; }
+        .btn-sm { padding: 5px 10px; font-size: 12px; }
+        .badge { padding: 5px 10px; border-radius: 20px; font-size: 12px; }
+        .badge-online { background: #d4edda; color: #155724; }
+    </style>
+</head>
+<body>
+    <div class="header"><h1>NetSapiens Device Portal - Admin</h1></div>
+    <div class="nav">
+        <a href="/ndp/dashboard">Dashboard</a>
+        <a href="/ndp/dashboard/devices" class="active">Devices</a>
+        <a href="/ndp/dashboard/users">Users</a>
+        <a href="/ndp/dashboard/config">Configuration</a>
+    </div>
+    <div class="main">
+        <div class="card">
+            <div class="card-header">
+                <h3>All Devices (1,847)</h3>
+                <button class="btn btn-primary">+ Add Device</button>
+            </div>
+            <div class="card-body">
+                <table>
+                    <tr><th>MAC Address</th><th>Model</th><th>Extension</th><th>User</th><th>IP Address</th><th>Status</th><th>Actions</th></tr>
+                    <tr><td>00:15:65:A1:B2:C3</td><td>Polycom VVX 500</td><td>1001</td><td>John Smith</td><td>192.168.1.101</td><td><span class="badge badge-online">Online</span></td><td><button class="btn btn-sm">Edit</button> <button class="btn btn-sm">Reprovision</button></td></tr>
+                    <tr><td>00:04:F2:D4:E5:F6</td><td>Yealink T46S</td><td>1002</td><td>Sarah Johnson</td><td>192.168.1.102</td><td><span class="badge badge-online">Online</span></td><td><button class="btn btn-sm">Edit</button> <button class="btn btn-sm">Reprovision</button></td></tr>
+                    <tr><td>00:0B:82:G7:H8:I9</td><td>Grandstream GXP2170</td><td>1003</td><td>Mike Williams</td><td>192.168.1.103</td><td><span class="badge badge-online">Online</span></td><td><button class="btn btn-sm">Edit</button> <button class="btn btn-sm">Reprovision</button></td></tr>
+                </table>
+            </div>
+        </div>
+    </div>
+</body>
+</html>
+"""
+        return web.Response(text=html, content_type='text/html')
+
+    async def ndp_dashboard_users(self, request):
+        """Fake NDP users management"""
+        await self._log_dashboard_action(request, 'VIEW_USERS', {'page': 'ndp_users'})
+
+        html = """<!DOCTYPE html>
+<html>
+<head>
+    <title>Users - NDP Admin</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: Arial, sans-serif; background: #f5f5f5; }
+        .header { background: #2c3e50; color: white; padding: 15px 30px; }
+        .nav { background: #34495e; padding: 0 30px; }
+        .nav a { display: inline-block; padding: 15px 20px; color: #ecf0f1; text-decoration: none; }
+        .nav a:hover, .nav a.active { background: #2c3e50; }
+        .main { padding: 30px; }
+        .card { background: white; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
+        .card-header { padding: 20px; border-bottom: 1px solid #eee; }
+        .card-body { padding: 20px; }
+        .form-group { margin-bottom: 20px; }
+        .form-group label { display: block; margin-bottom: 5px; font-weight: bold; }
+        .form-group input, .form-group select { width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px; }
+        .btn { padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer; }
+        .btn-primary { background: #3498db; color: white; }
+    </style>
+</head>
+<body>
+    <div class="header"><h1>NetSapiens Device Portal - Admin</h1></div>
+    <div class="nav">
+        <a href="/ndp/dashboard">Dashboard</a>
+        <a href="/ndp/dashboard/devices">Devices</a>
+        <a href="/ndp/dashboard/users" class="active">Users</a>
+        <a href="/ndp/dashboard/config">Configuration</a>
+    </div>
+    <div class="main">
+        <div class="card">
+            <div class="card-header"><h3>Add New User</h3></div>
+            <div class="card-body">
+                <form method="POST" action="/ndp/dashboard/users">
+                    <div class="form-group">
+                        <label>Extension</label>
+                        <input type="text" name="extension" placeholder="1001">
+                    </div>
+                    <div class="form-group">
+                        <label>Full Name</label>
+                        <input type="text" name="full_name" placeholder="John Smith">
+                    </div>
+                    <div class="form-group">
+                        <label>Email</label>
+                        <input type="email" name="email" placeholder="john@company.com">
+                    </div>
+                    <div class="form-group">
+                        <label>SIP Password</label>
+                        <input type="text" name="sip_password" placeholder="Enter SIP password">
+                    </div>
+                    <div class="form-group">
+                        <label>Voicemail PIN</label>
+                        <input type="text" name="voicemail_pin" placeholder="1234">
+                    </div>
+                    <button type="submit" class="btn btn-primary">Create User</button>
+                </form>
+            </div>
+        </div>
+    </div>
+</body>
+</html>
+"""
+        return web.Response(text=html, content_type='text/html')
+
+    async def ndp_dashboard_users_post(self, request):
+        """Capture NDP user creation form"""
+        source_ip = request.remote
+        forwarded = request.headers.get('X-Forwarded-For')
+        if forwarded:
+            source_ip = forwarded.split(',')[0].strip()
+
+        try:
+            data = await request.post()
+            form_data = {k: v for k, v in data.items()}
+            logger.warning(f"CAPTURED USER CREATION - NDP from {source_ip}: {form_data}")
+
+            if self.log_callback:
+                entry = {
+                    'timestamp': datetime.utcnow().isoformat(),
+                    'source_ip': source_ip,
+                    'source_port': 0,
+                    'method': 'FORM_SUBMISSION',
+                    'uri': '/ndp/dashboard/users',
+                    'form_data': form_data,
+                    'user_agent': request.headers.get('User-Agent', ''),
+                    'protocol': 'HTTP',
+                    'honeypot_type': 'provisioning'
+                }
+                asyncio.create_task(self.log_callback(entry))
+        except:
+            pass
+
+        return web.Response(text="<html><body><h2>User Created Successfully!</h2><a href='/ndp/dashboard/users'>Add Another</a></body></html>", content_type='text/html')
+
+    async def ndp_dashboard_config(self, request):
+        """Fake NDP configuration page"""
+        await self._log_dashboard_action(request, 'VIEW_CONFIG', {'page': 'ndp_config'})
+
+        html = """<!DOCTYPE html>
+<html>
+<head>
+    <title>Configuration - NDP Admin</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: Arial, sans-serif; background: #f5f5f5; }
+        .header { background: #2c3e50; color: white; padding: 15px 30px; }
+        .nav { background: #34495e; padding: 0 30px; }
+        .nav a { display: inline-block; padding: 15px 20px; color: #ecf0f1; text-decoration: none; }
+        .nav a:hover, .nav a.active { background: #2c3e50; }
+        .main { padding: 30px; }
+        .card { background: white; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); margin-bottom: 20px; }
+        .card-header { padding: 20px; border-bottom: 1px solid #eee; }
+        .card-body { padding: 20px; }
+        .form-group { margin-bottom: 20px; }
+        .form-group label { display: block; margin-bottom: 5px; font-weight: bold; }
+        .form-group input, .form-group textarea { width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px; }
+        .btn { padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer; }
+        .btn-primary { background: #3498db; color: white; }
+        .btn-danger { background: #e74c3c; color: white; }
+    </style>
+</head>
+<body>
+    <div class="header"><h1>NetSapiens Device Portal - Admin</h1></div>
+    <div class="nav">
+        <a href="/ndp/dashboard">Dashboard</a>
+        <a href="/ndp/dashboard/devices">Devices</a>
+        <a href="/ndp/dashboard/users">Users</a>
+        <a href="/ndp/dashboard/config" class="active">Configuration</a>
+    </div>
+    <div class="main">
+        <div class="card">
+            <div class="card-header"><h3>Provisioning Server Settings</h3></div>
+            <div class="card-body">
+                <form method="POST" action="/ndp/dashboard/config">
+                    <div class="form-group">
+                        <label>Provisioning Server URL</label>
+                        <input type="text" name="prov_server" value="https://prov.company.com">
+                    </div>
+                    <div class="form-group">
+                        <label>SIP Registrar</label>
+                        <input type="text" name="sip_registrar" value="sip.company.com">
+                    </div>
+                    <div class="form-group">
+                        <label>SIP Proxy</label>
+                        <input type="text" name="sip_proxy" value="proxy.company.com">
+                    </div>
+                    <div class="form-group">
+                        <label>Admin Email</label>
+                        <input type="email" name="admin_email" value="admin@company.com">
+                    </div>
+                    <div class="form-group">
+                        <label>API Key</label>
+                        <input type="text" name="api_key" placeholder="Enter new API key to change">
+                    </div>
+                    <button type="submit" class="btn btn-primary">Save Configuration</button>
+                </form>
+            </div>
+        </div>
+        <div class="card">
+            <div class="card-header"><h3>Database Export</h3></div>
+            <div class="card-body">
+                <p style="margin-bottom:15px;">Export all device configurations and user data.</p>
+                <button class="btn btn-primary">Export All Data (CSV)</button>
+                <button class="btn btn-danger" style="margin-left:10px;">Reset Database</button>
+            </div>
+        </div>
+    </div>
+</body>
+</html>
+"""
+        return web.Response(text=html, content_type='text/html')
+
+    async def ndp_dashboard_config_post(self, request):
+        """Capture NDP config changes"""
+        source_ip = request.remote
+        forwarded = request.headers.get('X-Forwarded-For')
+        if forwarded:
+            source_ip = forwarded.split(',')[0].strip()
+
+        try:
+            data = await request.post()
+            form_data = {k: v for k, v in data.items()}
+            logger.warning(f"CAPTURED CONFIG DATA - NDP from {source_ip}: {form_data}")
+
+            if self.log_callback:
+                entry = {
+                    'timestamp': datetime.utcnow().isoformat(),
+                    'source_ip': source_ip,
+                    'source_port': 0,
+                    'method': 'FORM_SUBMISSION',
+                    'uri': '/ndp/dashboard/config',
+                    'form_data': form_data,
+                    'user_agent': request.headers.get('User-Agent', ''),
+                    'protocol': 'HTTP',
+                    'honeypot_type': 'provisioning'
+                }
+                asyncio.create_task(self.log_callback(entry))
+        except:
+            pass
+
+        return web.Response(text="<html><body><h2>Configuration Saved!</h2><a href='/ndp/dashboard'>Return to Dashboard</a></body></html>", content_type='text/html')
 
     async def generic_provision(self, request):
         """Generic provisioning catch-all"""

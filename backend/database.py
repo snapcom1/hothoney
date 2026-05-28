@@ -112,8 +112,15 @@ class Database:
                     honeypot_type VARCHAR(50),
                     INDEX idx_source_ip (source_ip),
                     INDEX idx_timestamp (timestamp),
-                    INDEX idx_method (method)
+                    INDEX idx_method (method),
+                    INDEX idx_method_timestamp (method, timestamp DESC)
                 )
+            """)
+
+            # Add composite index if table already exists (for upgrades)
+            await cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_method_timestamp
+                ON honeypot_logs (method, timestamp DESC)
             """)
 
             # Whitelisted IPs (never block)
@@ -679,25 +686,59 @@ class HoneypotLogger:
             return deleted
 
     async def get_logs(self, limit: int = 100, offset: int = 0,
-                       ip_filter: str = None, method_filter: str = None) -> List[Dict]:
-        """Get honeypot logs with optional filters"""
+                       ip_filter: str = None, method_filter: str = None) -> dict:
+        """Get honeypot logs with optional filters. Returns dict with logs and total_count."""
         async with self.db.get_cursor() as cursor:
-            query = "SELECT * FROM honeypot_logs WHERE 1=1"
+            # Build WHERE clause
+            where_clause = "WHERE 1=1"
             params = []
+            has_filters = False
 
             if ip_filter:
-                query += " AND source_ip LIKE %s"
-                params.append(f"%{ip_filter}%")
+                has_filters = True
+                # Use prefix match (LIKE 'x%') for index usage, or exact match for full IPs
+                if ip_filter.count('.') == 3 and all(p.isdigit() for p in ip_filter.split('.')):
+                    # Looks like a complete IP - use exact match
+                    where_clause += " AND source_ip = %s"
+                    params.append(ip_filter)
+                else:
+                    # Partial IP - use prefix match (much faster than %x%)
+                    where_clause += " AND source_ip LIKE %s"
+                    params.append(f"{ip_filter}%")
 
             if method_filter:
-                query += " AND method = %s"
+                has_filters = True
+                where_clause += " AND method = %s"
                 params.append(method_filter)
 
-            query += " ORDER BY timestamp DESC LIMIT %s OFFSET %s"
+            # Get total count - skip expensive count for filtered queries on first page
+            # For filtered queries, we'll get count only if needed for pagination
+            if has_filters and offset == 0:
+                # First page with filters - skip count, we'll estimate from results
+                total_count = None
+            else:
+                count_query = f"SELECT COUNT(*) as total FROM honeypot_logs {where_clause}"
+                await cursor.execute(count_query, list(params))  # Copy params
+                total_count = (await cursor.fetchone())['total']
+
+            # Get paginated results - only select needed columns for performance
+            query = f"""SELECT id, timestamp, source_ip, source_port, honeypot_type,
+                              method, uri, user_agent, headers, credentials
+                       FROM honeypot_logs {where_clause}
+                       ORDER BY timestamp DESC LIMIT %s OFFSET %s"""
             params.extend([limit, offset])
 
             await cursor.execute(query, params)
-            return await cursor.fetchall()
+            logs = await cursor.fetchall()
+
+            # If we skipped count and got full page, there's probably more
+            if total_count is None:
+                if len(logs) == limit:
+                    total_count = -1  # Signal "more available"
+                else:
+                    total_count = offset + len(logs)  # Exact count for partial page
+
+            return {'logs': logs, 'total_count': total_count}
 
     async def get_stats(self) -> Dict:
         """Get honeypot statistics"""

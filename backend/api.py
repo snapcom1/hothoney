@@ -711,13 +711,15 @@ class HoneypotAPI:
     # Logs endpoints
     @auth_required()
     async def get_logs(self, request):
-        """Get honeypot logs"""
+        """Get honeypot logs with pagination info"""
         limit = int(request.query.get('limit', 100))
         offset = int(request.query.get('offset', 0))
         ip_filter = request.query.get('ip')
         method_filter = request.query.get('method')
 
-        logs = await self.honeypot_logger.get_logs(limit, offset, ip_filter, method_filter)
+        result = await self.honeypot_logger.get_logs(limit, offset, ip_filter, method_filter)
+        logs = result['logs']
+        total_count = result['total_count']
 
         # Convert datetime and parse JSON fields
         for log in logs:
@@ -730,7 +732,18 @@ class HoneypotAPI:
                     except:
                         pass
 
-        return json_response({'logs': logs, 'limit': limit, 'offset': offset})
+        # Calculate pagination info
+        current_page = (offset // limit) + 1
+        total_pages = (total_count + limit - 1) // limit  # Ceiling division
+
+        return json_response({
+            'logs': logs,
+            'limit': limit,
+            'offset': offset,
+            'total_count': total_count,
+            'current_page': current_page,
+            'total_pages': total_pages
+        })
 
     # Export endpoints
     @auth_required()

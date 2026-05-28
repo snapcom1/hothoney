@@ -1032,8 +1032,30 @@ class HoneypotDashboard {
                 </tr>
             `}).join('') || '<tr><td colspan="9">No logs found</td></tr>';
 
-            document.getElementById('logs-page-info').textContent =
-                `Showing ${data.logs.length} records`;
+            // Update pagination info
+            const startRecord = data.offset + 1;
+            const endRecord = data.offset + data.logs.length;
+
+            let pageInfo;
+            if (data.total_count === -1) {
+                // Filtered results with more available
+                pageInfo = `Showing ${startRecord.toLocaleString()}-${endRecord.toLocaleString()} (more available)`;
+            } else if (data.total_pages <= 1) {
+                pageInfo = `Showing ${data.logs.length.toLocaleString()} record${data.logs.length !== 1 ? 's' : ''}`;
+            } else {
+                pageInfo = `Page ${data.current_page} of ${data.total_pages.toLocaleString()} (${startRecord.toLocaleString()}-${endRecord.toLocaleString()} of ${data.total_count.toLocaleString()})`;
+            }
+            document.getElementById('logs-page-info').textContent = pageInfo;
+
+            // Store total for pagination controls
+            this.logsTotalCount = data.total_count;
+            this.logsTotalPages = data.total_pages;
+
+            // Update button states
+            document.getElementById('logs-prev').disabled = data.current_page <= 1;
+            // For filtered results with unknown total, enable next if we got a full page
+            const hasMore = data.total_count === -1 || data.current_page < data.total_pages;
+            document.getElementById('logs-next').disabled = !hasMore;
         } catch (error) {
             this.showToast('Failed to load logs', 'error');
         }
@@ -1047,8 +1069,11 @@ class HoneypotDashboard {
     }
 
     logsNextPage() {
-        this.logsOffset += this.pageSize;
-        this.loadLogs();
+        // Only advance if we haven't reached the last page
+        if (!this.logsTotalPages || (this.logsOffset + this.pageSize) < this.logsTotalCount) {
+            this.logsOffset += this.pageSize;
+            this.loadLogs();
+        }
     }
 
     showLogDetails(log) {

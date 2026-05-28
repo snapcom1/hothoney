@@ -32,6 +32,12 @@ ASN_LOOKUP_URL = 'https://rdap.org/autnum/'
 # IP-API for geolocation (free tier: 45 requests/minute)
 IPAPI_URL = 'http://ip-api.com/json/'
 
+# Default headers to avoid Cloudflare blocks
+DEFAULT_HEADERS = {
+    'User-Agent': 'SIPHoneypot/1.0 (Abuse Report System; +https://github.com/sip-honeypot)',
+    'Accept': 'application/json',
+}
+
 
 class IPLookup:
     """Async IP lookup using RDAP protocol"""
@@ -75,7 +81,7 @@ class IPLookup:
         }
 
         try:
-            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30)) as session:
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30), headers=DEFAULT_HEADERS) as session:
                 # Use bootstrap endpoint - it redirects to correct RIR
                 url = f"{RDAP_BOOTSTRAP}{ip}"
 
@@ -248,7 +254,7 @@ class IPLookup:
         }
 
         try:
-            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10)) as session:
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10), headers=DEFAULT_HEADERS) as session:
                 # ip-api.com with ASN and geo fields
                 url = f"{IPAPI_URL}{clean_ip}?fields=status,message,country,countryCode,region,regionName,city,lat,lon,isp,org,as,asname"
                 async with session.get(url) as response:
