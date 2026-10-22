@@ -644,18 +644,19 @@ class HoneypotLogger:
             logger.error(f"Failed to send automatic abuse report for {ip}: {e}")
 
     async def cleanup_expired_blocks(self):
-        """Remove blocks older than block_duration_days"""
+        """Remove auto-blocked IPs older than blocklist_expiry_days setting"""
+        expiry_days = await self._get_expiry_days()
         async with self.db.get_cursor() as cursor:
             await cursor.execute("""
                 UPDATE blocked_ips
                 SET active = FALSE
                 WHERE auto_blocked = TRUE
-                AND first_seen < DATE_SUB(NOW(), INTERVAL %s DAY)
+                AND last_seen < DATE_SUB(NOW(), INTERVAL %s DAY)
                 AND active = TRUE
-            """, (self.block_duration_days,))
+            """, (expiry_days,))
             removed = cursor.rowcount
             if removed > 0:
-                logger.info(f"Expired {removed} blocks older than {self.block_duration_days} days")
+                logger.info(f"Expired {removed} blocks older than {expiry_days} days")
 
     async def cleanup_old_logs(self, max_rows: int = 1000000):
         """Delete oldest logs when exceeding max_rows"""

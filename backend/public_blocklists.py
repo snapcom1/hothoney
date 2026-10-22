@@ -325,6 +325,43 @@ class PublicBlocklistManager:
                 WHERE ip_address = %s AND added_by = 'apiban'
             """, (ip,))
 
+    async def purge_old_entries(self, max_age_days: int = 90) -> Dict:
+        """Remove public blocklist entries older than max_age_days"""
+        try:
+            async with self.db.get_cursor() as cursor:
+                # Remove old entries from tracking table and get the IPs
+                await cursor.execute("""
+                    SELECT ip_address, list_id FROM public_blocklist_ips
+                    WHERE imported_at < DATE_SUB(NOW(), INTERVAL %s DAY)
+                """, (max_age_days,))
+                old_entries = await cursor.fetchall()
+
+                if not old_entries:
+                    return {'success': True, 'purged': 0}
+
+                # Remove from tracking table
+                await cursor.execute("""
+                    DELETE FROM public_blocklist_ips
+                    WHERE imported_at < DATE_SUB(NOW(), INTERVAL %s DAY)
+                """, (max_age_days,))
+                purged_tracking = cursor.rowcount
+
+                # Remove corresponding blocked_ips entries
+                purged_blocked = 0
+                for entry in old_entries:
+                    await cursor.execute("""
+                        DELETE FROM blocked_ips
+                        WHERE ip_address = %s AND added_by = %s
+                    """, (entry['ip_address'], entry['list_id']))
+                    purged_blocked += cursor.rowcount
+
+            logger.info(f"Public blocklist purge: {purged_tracking} tracking entries and {purged_blocked} blocked IPs older than {max_age_days} days removed")
+            return {'success': True, 'purged': purged_tracking, 'purged_blocked': purged_blocked}
+
+        except Exception as e:
+            logger.error(f"Public blocklist purge failed: {e}")
+            return {'success': False, 'error': str(e)}
+
     async def sync_all(self) -> Dict:
         """Sync all enabled blocklists"""
         results = {}

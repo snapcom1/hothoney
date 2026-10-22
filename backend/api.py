@@ -111,6 +111,7 @@ class HoneypotAPI:
         self.app.router.add_get('/api/public/blocklist.txt', self.public_blocklist_txt)
         self.app.router.add_get('/api/public/blocklist-ipv4.txt', self.public_blocklist_ipv4)
         self.app.router.add_get('/api/public/blocklist-ipv6.txt', self.public_blocklist_ipv6)
+        self.app.router.add_get('/api/public/cloudflare.txt', self.public_cloudflare_list)
         self.app.router.add_get('/api/public/juniper-feed', self.public_juniper_feed)
         self.app.router.add_get('/api/public/juniper-prefixlist', self.public_juniper_prefixlist)
         self.app.router.add_get('/api/public/stats', self.public_stats)
@@ -919,6 +920,17 @@ class HoneypotAPI:
             content_type='text/plain'
         )
 
+    async def public_cloudflare_list(self, request):
+        """Cloudflare-compatible IP list - one IP/CIDR per line, no comments, no blanks"""
+        ips = await self.blocklist.get_blocked_ips(active_only=True, limit=10000)
+        ipv4, _ = self._split_ips_by_version(ips)
+        ip_list = '\n'.join(f"{ip}/32" if '/' not in ip else ip for ip in ipv4)
+        return web.Response(
+            text=f"{ip_list}\n",
+            content_type='text/plain',
+            headers={'Cache-Control': 'public, max-age=300'}
+        )
+
     async def public_juniper_feed(self, request):
         """Juniper SRX dynamic address feed format - clean IP list with prefix"""
         ips = await self.blocklist.get_blocked_ips(active_only=True, limit=10000)
@@ -1386,6 +1398,11 @@ class HoneypotAPI:
                             logger.info(f"Auto-sync: APIBAN cleanup complete - {cleanup_result.get('removed', 0)} removed")
                         else:
                             logger.warning(f"Auto-sync: APIBAN cleanup failed - {cleanup_result.get('error', 'Unknown error')}")
+
+                        # Purge entries older than 90 days
+                        purge_result = await self.public_blocklist_mgr.purge_old_entries(max_age_days=90)
+                        if purge_result.get('success') and purge_result.get('purged', 0) > 0:
+                            logger.info(f"Auto-sync: Purged {purge_result['purged']} public blocklist entries older than 90 days")
             except Exception as e:
                 logger.error(f"Auto-sync error: {e}")
 
