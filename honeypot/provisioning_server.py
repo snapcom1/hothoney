@@ -37,6 +37,19 @@ FAKE_PROXY_SERVERS = [
 class ProvisioningHoneypot:
     """HTTP Provisioning Honeypot Server"""
 
+    PHP_SHELL_PATHS = [
+        'shell.php', 'cmd.php', 'c99.php', 'r57.php', 'b374k.php',
+        'wso.php', 'webshell.php', 'backdoor.php', 'hack.php',
+        'up.php', 'upload.php', 'filemanager.php', 'files.php',
+        'exec.php', 'eval.php', 'command.php', 'terminal.php',
+        'console.php', 'phpinfo.php', 'info.php', 'test.php',
+        'wp-content/uploads/shell.php', 'wp-content/plugins/shell.php',
+        'wp-includes/shell.php', 'images/shell.php', 'tmp/shell.php',
+        'alfa.php', 'alfaloader.php', 'mini.php', 'adminer.php',
+        'phpMyAdmin/index.php', 'phpmyadmin/index.php', 'pma/index.php',
+        'myadmin/index.php', 'db/index.php',
+    ]
+
     def __init__(self, log_callback=None):
         self.log_callback = log_callback
         self.app = web.Application(middlewares=[self.logging_middleware])
@@ -221,6 +234,14 @@ class ProvisioningHoneypot:
         self.app.router.add_get('/prov/{path:.*}', self.generic_provision)
         self.app.router.add_get('/provisioning/{path:.*}', self.generic_provision)
         self.app.router.add_get('/config/{path:.*}', self.generic_provision)
+
+        # PHP shell honeypot - common webshell paths
+        for shell_path in self.PHP_SHELL_PATHS:
+            self.app.router.add_get(f'/{shell_path}', self.php_shell_page)
+            self.app.router.add_post(f'/{shell_path}', self.php_shell_execute)
+        # Catch .php requests with cmd/c/exec params
+        self.app.router.add_get('/{path:.*\\.php}', self.php_catch)
+        self.app.router.add_post('/{path:.*\\.php}', self.php_catch)
 
         # Catch-all for scanning attempts
         self.app.router.add_get('/{path:.*}', self.catch_all)
@@ -1997,6 +2018,442 @@ h2{color:#4ade80;margin-bottom:15px;}</style></head>
             pass
 
         return web.Response(text="<html><body><h2>Configuration Saved!</h2><a href='/ndp/dashboard'>Return to Dashboard</a></body></html>", content_type='text/html')
+
+    # ==================== PHP SHELL HONEYPOT ====================
+
+    async def _log_shell_action(self, request, action, details=None):
+        """Log PHP shell honeypot activity"""
+        source_ip = request.remote
+        forwarded = request.headers.get('X-Forwarded-For')
+        if forwarded:
+            source_ip = forwarded.split(',')[0].strip()
+
+        logger.warning(f"PHP SHELL HONEYPOT - {action} from {source_ip}: {details}")
+
+        if self.log_callback:
+            entry = {
+                'timestamp': datetime.utcnow().isoformat(),
+                'source_ip': source_ip,
+                'source_port': 0,
+                'method': 'WEBSHELL_ACCESS',
+                'uri': request.path,
+                'action': action,
+                'details': details,
+                'user_agent': request.headers.get('User-Agent', ''),
+                'protocol': 'HTTP',
+                'honeypot_type': 'webshell'
+            }
+            asyncio.create_task(self.log_callback(entry))
+
+    def _fake_shell_output(self, cmd):
+        """Generate realistic fake output for shell commands"""
+        cmd = cmd.strip()
+        parts = cmd.split()
+        if not parts:
+            return ''
+        base = parts[0]
+
+        hostname = 'web-prod-03'
+        fake_ip = f'10.0.{random.randint(1,254)}.{random.randint(2,254)}'
+
+        outputs = {
+            'id': 'uid=33(www-data) gid=33(www-data) groups=33(www-data)',
+            'whoami': 'www-data',
+            'hostname': hostname,
+            'pwd': '/var/www/html',
+            'uname': 'Linux web-prod-03 5.15.0-91-generic #101-Ubuntu SMP Tue Nov 14 13:30:08 UTC 2023 x86_64 x86_64 x86_64 GNU/Linux',
+        }
+
+        if base in outputs and len(parts) == 1:
+            return outputs[base]
+        if base == 'uname':
+            return outputs['uname']
+
+        if base == 'ls':
+            target = parts[-1] if len(parts) > 1 and not parts[-1].startswith('-') else '.'
+            listings = {
+                '.': 'admin.php\nconfig.php\ncss\nimages\ninclude\nindex.php\njs\nuploads\nwp-admin\nwp-content\nwp-includes',
+                '/tmp': f'php{random.randint(1000,9999)}.tmp\nsess_{hashlib.md5(str(random.random()).encode()).hexdigest()[:16]}\nsystemd-private-xxx',
+                '/etc': 'apache2\ncron.d\ncrontab\nhostname\nhosts\nld.so.conf\nmy.cnf\nnginx\npasswd\nphp\nresolv.conf\nshadow\nssl',
+                '/var/www': 'html\nlogs\nvhosts',
+                '/var/www/html': 'admin.php\nconfig.php\ncss\nimages\ninclude\nindex.php\njs\nuploads\nwp-admin\nwp-content\nwp-includes',
+                'uploads': f'2023\n2024\nbackup.sql.gz\nrevslider.zip\nshell.php.bak',
+            }
+            if '-la' in cmd or '-al' in cmd:
+                items = listings.get(target, listings['.']).split('\n')
+                result = f'total {len(items) * 4}\ndrwxr-xr-x  {len(items)} www-data www-data 4096 Oct 15 14:23 .\ndrwxr-xr-x  3 root     root     4096 Aug  1 09:15 ..\n'
+                for item in items:
+                    size = random.randint(100, 65536)
+                    month = random.choice(['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'])
+                    day = random.randint(1, 28)
+                    perm = 'drwxr-xr-x' if '.' not in item or item.startswith('.') else '-rw-r--r--'
+                    result += f'{perm}  1 www-data www-data {size:>5} {month} {day:>2} {random.randint(0,23):02d}:{random.randint(0,59):02d} {item}\n'
+                return result.strip()
+            return listings.get(target, listings['.'])
+
+        if base == 'cat':
+            target = parts[1] if len(parts) > 1 else ''
+            if 'passwd' in target:
+                return ('root:x:0:0:root:/root:/bin/bash\n'
+                    'daemon:x:1:1:daemon:/usr/sbin:/usr/sbin/nologin\n'
+                    'bin:x:2:2:bin:/bin:/usr/sbin/nologin\n'
+                    'sys:x:3:3:sys:/dev:/usr/sbin/nologin\n'
+                    'www-data:x:33:33:www-data:/var/www:/usr/sbin/nologin\n'
+                    'mysql:x:27:27:MySQL Server:/var/lib/mysql:/bin/false\n'
+                    'sshd:x:105:65534::/run/sshd:/usr/sbin/nologin\n'
+                    'admin:x:1000:1000:Admin User:/home/admin:/bin/bash')
+            if 'shadow' in target:
+                return 'cat: /etc/shadow: Permission denied'
+            if 'config.php' in target or 'wp-config' in target:
+                db_pass = ''.join(random.choices(string.ascii_letters + string.digits, k=16))
+                auth_key = ''.join(random.choices(string.ascii_letters + string.digits, k=64))
+                nl = '\n'
+                return (f"<?php{nl}"
+                    f"define('DB_NAME', 'wordpress_prod');{nl}"
+                    f"define('DB_USER', 'wp_admin');{nl}"
+                    f"define('DB_PASSWORD', '{db_pass}');{nl}"
+                    f"define('DB_HOST', 'localhost');{nl}"
+                    f"define('DB_CHARSET', 'utf8mb4');{nl}"
+                    f"$table_prefix = 'wp_';{nl}"
+                    f"define('AUTH_KEY', '{auth_key}');{nl}"
+                    f"define('WP_DEBUG', false);{nl}"
+                    f"?>")
+            if '.htaccess' in target:
+                return 'RewriteEngine On\nRewriteBase /\nRewriteRule ^index\\.php$ - [L]\nRewriteCond %{REQUEST_FILENAME} !-f\nRewriteCond %{REQUEST_FILENAME} !-d\nRewriteRule . /index.php [L]'
+            if 'my.cnf' in target or 'mysql' in target:
+                return '[mysqld]\ndatadir=/var/lib/mysql\nsocket=/var/lib/mysql/mysql.sock\nuser=mysql\nmax_connections=500\ninnodb_buffer_pool_size=2G'
+            return f'cat: {target}: No such file or directory' if target else ''
+
+        if base == 'ps':
+            return ('USER       PID %CPU %MEM    VSZ   RSS TTY      STAT START   TIME COMMAND\n'
+                'root         1  0.0  0.1 169436 11200 ?        Ss   Oct01   0:13 /sbin/init\n'
+                'root       423  0.0  0.1  72304  6144 ?        Ss   Oct01   0:02 /usr/sbin/sshd -D\n'
+                'mysql      891  0.3  4.2 1842396 348160 ?      Ssl  Oct01  45:12 /usr/sbin/mysqld\n'
+                f'root       912  0.0  0.2 144520 17408 ?        Ss   Oct01   0:08 /usr/sbin/apache2 -k start\n'
+                f'www-data  1034  0.0  0.1 144960  9216 ?        S    Oct01   2:14 /usr/sbin/apache2 -k start\n'
+                f'www-data  1035  0.0  0.1 144960  9100 ?        S    Oct01   2:08 /usr/sbin/apache2 -k start\n'
+                f'www-data  {random.randint(10000,30000)}  0.0  0.0  2608  1536 ?        S    {random.randint(10,23):02d}:{random.randint(0,59):02d}   0:00 sh -c /usr/bin/php')
+
+        if base in ('ifconfig', 'ip'):
+            return (f'eth0: flags=4163<UP,BROADCAST,RUNNING,MULTICAST>  mtu 1500\n'
+                f'        inet {fake_ip}  netmask 255.255.255.0  broadcast 10.0.1.255\n'
+                f'        inet6 fe80::42:acff:fe11:1  prefixlen 64  scopeid 0x20<link>\n'
+                f'        ether 02:42:ac:11:00:02  txqueuelen 0  (Ethernet)\n'
+                f'        RX packets 2847563  bytes 1893452781 (1.7 GiB)\n'
+                f'        TX packets 1923847  bytes 892374651 (827.2 MiB)\n\n'
+                f'lo: flags=73<UP,LOOPBACK,RUNNING>  mtu 65536\n'
+                f'        inet 127.0.0.1  netmask 255.0.0.0\n'
+                f'        loop  txqueuelen 1000  (Local Loopback)')
+
+        if base == 'netstat':
+            return (f'Active Internet connections (servers and established)\n'
+                f'Proto Recv-Q Send-Q Local Address           Foreign Address         State\n'
+                f'tcp        0      0 0.0.0.0:80              0.0.0.0:*               LISTEN\n'
+                f'tcp        0      0 0.0.0.0:443             0.0.0.0:*               LISTEN\n'
+                f'tcp        0      0 0.0.0.0:22              0.0.0.0:*               LISTEN\n'
+                f'tcp        0      0 127.0.0.1:3306          0.0.0.0:*               LISTEN\n'
+                f'tcp        0      0 {fake_ip}:443      185.220.101.{random.randint(1,254)}:{random.randint(40000,60000)}   ESTABLISHED\n'
+                f'tcp        0      0 {fake_ip}:80       {random.randint(1,223)}.{random.randint(0,255)}.{random.randint(0,255)}.{random.randint(1,254)}:{random.randint(40000,60000)}   ESTABLISHED')
+
+        if base == 'df':
+            return ('Filesystem      Size  Used Avail Use% Mounted on\n'
+                '/dev/sda1        50G   23G   25G  48% /\n'
+                'tmpfs           2.0G     0  2.0G   0% /dev/shm\n'
+                '/dev/sda2       200G  142G   48G  75% /var/www')
+
+        if base == 'free':
+            return ('              total        used        free      shared  buff/cache   available\n'
+                'Mem:        8167940     3245612     1892340      142568     3029988     4562120\n'
+                'Swap:       2097148      524288     1572860')
+
+        if base in ('wget', 'curl'):
+            url = parts[1] if len(parts) > 1 else 'http://example.com'
+            if base == 'wget':
+                fname = url.split('/')[-1] if '/' in url else 'index.html'
+                return (f'--{datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")}--  {url}\n'
+                    f'Resolving {url.split("//")[-1].split("/")[0]}... {random.randint(1,223)}.{random.randint(0,255)}.{random.randint(0,255)}.{random.randint(1,254)}\n'
+                    f'Connecting to {url.split("//")[-1].split("/")[0]}... connected.\n'
+                    f'HTTP request sent, awaiting response... 200 OK\n'
+                    f'Length: {random.randint(1000,500000)} ({random.randint(1,500)}K) [application/octet-stream]\n'
+                    f'Saving to: \'{fname}\'\n\n'
+                    f'{fname}          100%[==================>] {random.randint(1,500)}K  {random.randint(100,999)}KB/s    in 0.{random.randint(1,9)}s\n\n'
+                    f'{datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")} (523 KB/s) - \'{fname}\' saved')
+            return f'{{"status":"ok","ip":"{fake_ip}"}}'
+
+        if base == 'find':
+            return (f'./uploads/2024/shell.php.bak\n'
+                f'./wp-content/cache/object/tmp.php\n'
+                f'./include/config.php\n'
+                f'./admin.php')
+
+        if base in ('chmod', 'chown', 'mv', 'cp', 'mkdir', 'touch'):
+            return ''
+
+        if base == 'echo':
+            rest = cmd[5:].strip()
+            return rest.strip('"').strip("'")
+
+        if base == 'python' or base == 'python3' or base == 'perl' or base == 'ruby':
+            return f'/bin/sh: 1: {base}: not found'
+
+        if base == 'nc' or base == 'ncat':
+            return f'/bin/sh: 1: {base}: not found'
+
+        if base == 'gcc' or base == 'cc':
+            return f'/bin/sh: 1: {base}: not found'
+
+        if base == 'sudo':
+            return f'www-data is not in the sudoers file. This incident will be reported.'
+
+        if base == 'su':
+            return 'su: Authentication failure'
+
+        if base == 'mysql':
+            if '-p' in cmd or '--password' in cmd:
+                return 'ERROR 1045 (28000): Access denied for user \'www-data\'@\'localhost\' (using password: YES)'
+            return ('Welcome to the MariaDB monitor. Commands end with ; or \\g.\n'
+                'Your MariaDB connection id is 847\n'
+                'Server version: 10.11.6-MariaDB-0ubuntu0.23.04.1 Ubuntu 23.04\n\n'
+                'MariaDB [(none)]> ')
+
+        if base == 'env' or base == 'printenv':
+            return (f'HOSTNAME={hostname}\n'
+                f'APACHE_RUN_USER=www-data\n'
+                f'APACHE_RUN_GROUP=www-data\n'
+                f'PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin\n'
+                f'PWD=/var/www/html\n'
+                f'LANG=C.UTF-8\n'
+                f'APACHE_LOG_DIR=/var/log/apache2\n'
+                f'DB_HOST=127.0.0.1\n'
+                f'DB_NAME=wordpress_prod\n'
+                f'DB_USER=wp_admin\n'
+                f'DB_PASS={"".join(random.choices(string.ascii_letters + string.digits, k=16))}')
+
+        if base == 'cd':
+            return ''
+
+        if cmd.startswith('/bin/') or cmd.startswith('/usr/'):
+            base_cmd = cmd.split('/')[-1].split()[0]
+            return self._fake_shell_output(cmd.replace(cmd.split()[0], base_cmd, 1))
+
+        return f'/bin/sh: 1: {base}: not found'
+
+    def _php_shell_html(self, request, output='', cmd=''):
+        """Generate the fake PHP shell page"""
+        source_ip = request.remote
+        forwarded = request.headers.get('X-Forwarded-For')
+        if forwarded:
+            source_ip = forwarded.split(',')[0].strip()
+
+        escaped_output = output.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+        escaped_cmd = cmd.replace('"', '&quot;')
+
+        if cmd:
+            output_content = '<span class="prompt">www-data@web-prod-03:/var/www/html$</span> <span class="cmd-text">' + escaped_cmd + '</span>\n' + escaped_output
+        else:
+            output_content = '# b374k shell ready\n# Type a command and press Execute\n'
+
+        return f"""<!DOCTYPE html>
+<html>
+<head>
+    <title>b374k 3.2 - shell</title>
+    <style>
+        * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+        body {{ background: #1a1a1a; color: #00ff00; font-family: 'Courier New', monospace; font-size: 13px; }}
+        .header {{ background: #0d0d0d; padding: 8px 15px; border-bottom: 1px solid #333; display: flex; justify-content: space-between; align-items: center; }}
+        .header .title {{ color: #ff6600; font-weight: bold; font-size: 14px; }}
+        .header .info {{ color: #888; font-size: 11px; }}
+        .nav {{ background: #111; padding: 5px 15px; border-bottom: 1px solid #333; }}
+        .nav a {{ color: #00aaff; text-decoration: none; margin-right: 15px; font-size: 12px; }}
+        .nav a:hover {{ color: #fff; }}
+        .nav a.active {{ color: #ff6600; }}
+        .sysinfo {{ background: #0d0d0d; padding: 10px 15px; border-bottom: 1px solid #222; font-size: 11px; color: #666; }}
+        .sysinfo span {{ color: #999; }}
+        .main {{ padding: 15px; }}
+        .cmd-box {{ background: #0d0d0d; border: 1px solid #333; border-radius: 3px; padding: 15px; margin-bottom: 15px; }}
+        .cmd-row {{ display: flex; align-items: center; gap: 10px; }}
+        .cmd-label {{ color: #ff6600; white-space: nowrap; }}
+        .cmd-input {{ flex: 1; background: #000; border: 1px solid #444; color: #00ff00; padding: 8px 12px; font-family: 'Courier New', monospace; font-size: 13px; border-radius: 2px; }}
+        .cmd-input:focus {{ outline: none; border-color: #00aaff; }}
+        .cmd-btn {{ background: #333; color: #00ff00; border: 1px solid #555; padding: 8px 20px; cursor: pointer; font-family: 'Courier New', monospace; border-radius: 2px; }}
+        .cmd-btn:hover {{ background: #444; }}
+        .output {{ background: #000; border: 1px solid #333; padding: 15px; min-height: 300px; max-height: 500px; overflow-y: auto; white-space: pre-wrap; word-wrap: break-word; font-size: 12px; line-height: 1.5; border-radius: 3px; }}
+        .output .prompt {{ color: #ff6600; }}
+        .output .cmd-text {{ color: #fff; }}
+        .upload-box {{ background: #0d0d0d; border: 1px solid #333; border-radius: 3px; padding: 15px; margin-top: 15px; }}
+        .upload-box h3 {{ color: #ff6600; font-size: 12px; margin-bottom: 10px; }}
+        .upload-row {{ display: flex; align-items: center; gap: 10px; }}
+        input[type="file"] {{ color: #888; font-size: 12px; }}
+        .footer {{ text-align: center; padding: 10px; color: #333; font-size: 10px; border-top: 1px solid #222; margin-top: 20px; }}
+    </style>
+</head>
+<body>
+    <div class="header">
+        <span class="title">b374k 3.2.3</span>
+        <span class="info">Safe mode: OFF | PHP {random.choice(['7.4.33','8.1.27','8.2.12'])} | {random.choice(['Apache/2.4.57','nginx/1.24.0'])}</span>
+    </div>
+    <div class="nav">
+        <a href="#" class="active">Command</a>
+        <a href="#">File Manager</a>
+        <a href="#">Upload</a>
+        <a href="#">Database</a>
+        <a href="#">Network</a>
+        <a href="#">Info</a>
+    </div>
+    <div class="sysinfo">
+        Server: <span>Linux web-prod-03 5.15.0-91-generic x86_64</span> |
+        User: <span>www-data (33)</span> |
+        CWD: <span>/var/www/html</span> |
+        Free: <span>{random.randint(20,45)}G / 50G</span>
+    </div>
+    <div class="main">
+        <form method="POST" action="{request.path}">
+            <div class="cmd-box">
+                <div class="cmd-row">
+                    <span class="cmd-label">www-data@web-prod-03:/var/www/html$</span>
+                    <input type="text" name="cmd" class="cmd-input" value="{escaped_cmd}" placeholder="Enter command..." autofocus autocomplete="off">
+                    <button type="submit" class="cmd-btn">Execute</button>
+                </div>
+            </div>
+        </form>
+        <div class="output">{output_content}</div>
+        <form method="POST" action="{request.path}" enctype="multipart/form-data">
+            <div class="upload-box">
+                <h3>File Upload</h3>
+                <div class="upload-row">
+                    <input type="file" name="upload_file">
+                    <input type="hidden" name="upload_dir" value="/var/www/html/uploads/">
+                    <button type="submit" name="action" value="upload" class="cmd-btn">Upload</button>
+                </div>
+            </div>
+        </form>
+    </div>
+    <div class="footer">b374k shell | {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')} UTC</div>
+    <script>document.querySelector('.cmd-input').focus();document.querySelector('.cmd-input').select();</script>
+</body>
+</html>"""
+
+    async def php_shell_page(self, request):
+        """Serve the fake PHP shell page"""
+        cmd = request.query.get('cmd', '') or request.query.get('c', '') or request.query.get('exec', '')
+
+        await self._log_shell_action(request, 'SHELL_ACCESS', {
+            'path': request.path,
+            'query_cmd': cmd or None,
+            'query': dict(request.query)
+        })
+
+        if cmd:
+            output = self._fake_shell_output(cmd)
+            await self._log_shell_action(request, 'SHELL_COMMAND', {
+                'command': cmd,
+                'path': request.path
+            })
+            # If request accepts JSON or has no Accept header (likely automated)
+            if 'json' in request.headers.get('Accept', '') or 'curl' in request.headers.get('User-Agent', '').lower():
+                return web.Response(text=output + '\n', content_type='text/plain')
+            return web.Response(text=self._php_shell_html(request, output, cmd), content_type='text/html')
+
+        return web.Response(text=self._php_shell_html(request), content_type='text/html')
+
+    async def php_shell_execute(self, request):
+        """Handle command execution and file uploads from the fake shell"""
+        source_ip = request.remote
+        forwarded = request.headers.get('X-Forwarded-For')
+        if forwarded:
+            source_ip = forwarded.split(',')[0].strip()
+
+        try:
+            # Check for multipart (file upload)
+            if request.content_type and 'multipart' in request.content_type:
+                reader = await request.multipart()
+                upload_filename = None
+                upload_size = 0
+                upload_dir = '/var/www/html/uploads/'
+                cmd = ''
+
+                async for part in reader:
+                    if part.name == 'upload_file' and part.filename:
+                        upload_filename = part.filename
+                        data = await part.read()
+                        upload_size = len(data)
+                    elif part.name == 'upload_dir':
+                        upload_dir = (await part.read()).decode()
+                    elif part.name == 'cmd':
+                        cmd = (await part.read()).decode()
+                    elif part.name == 'action':
+                        await part.read()
+
+                if upload_filename:
+                    await self._log_shell_action(request, 'SHELL_UPLOAD', {
+                        'filename': upload_filename,
+                        'size': upload_size,
+                        'upload_dir': upload_dir,
+                    })
+                    output = f'File uploaded successfully: {upload_dir}{upload_filename} ({upload_size} bytes)'
+                    return web.Response(text=self._php_shell_html(request, output, f'upload {upload_filename}'), content_type='text/html')
+
+            # Regular form POST (command execution)
+            data = await request.post()
+            cmd = data.get('cmd', '') or data.get('c', '') or data.get('exec', '')
+        except Exception:
+            cmd = ''
+            try:
+                body = await request.text()
+                if body:
+                    await self._log_shell_action(request, 'SHELL_RAW_POST', {
+                        'body': body[:2000],
+                        'content_type': request.content_type
+                    })
+            except Exception:
+                pass
+
+        if cmd:
+            await self._log_shell_action(request, 'SHELL_COMMAND', {
+                'command': cmd,
+                'path': request.path
+            })
+            output = self._fake_shell_output(cmd)
+
+            # For automated tools, return plain text
+            if 'curl' in request.headers.get('User-Agent', '').lower() or request.content_type == 'application/x-www-form-urlencoded' and 'Accept' not in request.headers:
+                # Check if this looks like an automated request
+                if not request.headers.get('Referer', ''):
+                    return web.Response(text=output + '\n', content_type='text/plain')
+
+            return web.Response(text=self._php_shell_html(request, output, cmd), content_type='text/html')
+
+        return web.Response(text=self._php_shell_html(request), content_type='text/html')
+
+    async def php_catch(self, request):
+        """Catch any .php request with cmd/exec params"""
+        cmd = request.query.get('cmd', '') or request.query.get('c', '') or request.query.get('exec', '') or request.query.get('command', '')
+
+        if cmd:
+            await self._log_shell_action(request, 'PHP_CMD_INJECTION', {
+                'path': request.path,
+                'command': cmd,
+                'query': dict(request.query)
+            })
+            output = self._fake_shell_output(cmd)
+            return web.Response(text=output + '\n', content_type='text/plain')
+
+        if request.method == 'POST':
+            try:
+                data = await request.post()
+                cmd = data.get('cmd', '') or data.get('c', '') or data.get('exec', '')
+                if cmd:
+                    await self._log_shell_action(request, 'PHP_CMD_INJECTION', {
+                        'path': request.path,
+                        'command': cmd,
+                    })
+                    output = self._fake_shell_output(cmd)
+                    return web.Response(text=output + '\n', content_type='text/plain')
+            except Exception:
+                pass
+
+        # No cmd param - return a generic PHP-looking response
+        return web.Response(text='', status=200, content_type='text/html')
 
     async def generic_provision(self, request):
         """Generic provisioning catch-all"""

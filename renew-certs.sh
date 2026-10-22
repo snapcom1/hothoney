@@ -12,5 +12,6 @@ cp /etc/letsencrypt/live/hothoney.snapcom.com/privkey.pem /root/sip-honeypot/apa
 chmod 644 /root/sip-honeypot/apache/ssl/server.crt
 chmod 600 /root/sip-honeypot/apache/ssl/server.key
 
-# Restart Apache with new certs
+# Rebuild and restart Apache so certs are baked into the image
+docker compose build apache
 docker compose up -d apache

@@ -194,6 +194,7 @@
                             <li><strong>All IPs (Text):</strong> <a href="/api/public/blocklist.txt" target="_blank">/api/public/blocklist.txt</a></li>
                             <li><strong>IPv4 Only:</strong> <a href="/api/public/blocklist-ipv4.txt" target="_blank">/api/public/blocklist-ipv4.txt</a></li>
                             <li><strong>IPv6 Only:</strong> <a href="/api/public/blocklist-ipv6.txt" target="_blank">/api/public/blocklist-ipv6.txt</a></li>
+                            <li><strong>Cloudflare:</strong> <a href="/api/public/cloudflare.txt" target="_blank">/api/public/cloudflare.txt</a> <span class="help-text">(IP/CIDR only, no comments)</span></li>
                         </ul>
                     </div>
                     <div class="card external-lists admin-only" id="external-blocklists-card">
@@ -258,6 +259,7 @@
                             <option value="CREDENTIALS_SENT">Fake Creds Sent</option>
                             <option value="HONEYPOT_LOGIN">Honeypot Logins</option>
                             <option value="DASHBOARD_ACTION">Dashboard Actions</option>
+                            <option value="WEBSHELL_ACCESS">Webshell Honeypot</option>
                         </select>
                         <button id="logs-refresh" class="btn">Refresh</button>
                     </div>
