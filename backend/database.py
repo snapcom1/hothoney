@@ -622,12 +622,59 @@ class HoneypotLogger:
                 # Send automatic abuse report
                 await self._send_abuse_report(ip)
 
+    async def _is_confirmed_attacker(self, ip: str) -> bool:
+        """Verify an IP shows real attack intent before reporting.
+
+        Filters out DDoS mitigation/reflection traffic which typically shows
+        only a single method with no credentials. Requires at least one of:
+        - Credential attempts (username/password guessing)
+        - 2+ distinct SIP methods (scanning behavior)
+        - Provisioning endpoint access (targeted recon)
+        """
+        async with self.db.get_cursor() as cursor:
+            # Check for credential attempts
+            await cursor.execute("""
+                SELECT COUNT(*) as count FROM honeypot_logs
+                WHERE source_ip = %s
+                AND credentials IS NOT NULL
+                AND JSON_EXTRACT(credentials, '$.username') IS NOT NULL
+            """, (ip,))
+            cred_result = await cursor.fetchone()
+            if cred_result['count'] > 0:
+                return True
+
+            # Check for multiple distinct methods
+            await cursor.execute("""
+                SELECT COUNT(DISTINCT method) as methods FROM honeypot_logs
+                WHERE source_ip = %s
+            """, (ip,))
+            method_result = await cursor.fetchone()
+            if method_result['methods'] >= 2:
+                return True
+
+            # Check for provisioning/webshell honeypot access
+            await cursor.execute("""
+                SELECT COUNT(*) as count FROM honeypot_logs
+                WHERE source_ip = %s
+                AND honeypot_type IN ('provisioning', 'webshell')
+            """, (ip,))
+            prov_result = await cursor.fetchone()
+            if prov_result['count'] > 0:
+                return True
+
+            return False
+
     async def _send_abuse_report(self, ip: str):
         """Send automatic abuse report for blocked IP"""
         if not self.abuse_reporter:
             return
 
         try:
+            # Verify real attack intent before reporting (filters reflection/mitigation traffic)
+            if not await self._is_confirmed_attacker(ip):
+                logger.info(f"Skipping abuse report for {ip}: insufficient attack indicators (possible reflection/mitigation)")
+                return
+
             # Reload settings to ensure we have latest SMTP config
             await self.abuse_reporter.reload_settings()
 
