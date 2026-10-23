@@ -769,8 +769,9 @@ class SIPProtocol(asyncio.DatagramProtocol):
 
         # Generate response based on method
         if msg.method == 'OPTIONS':
-            # Respond to OPTIONS to appear as real server
-            response = self.honeypot.generate_ok_response(msg, addr)
+            # Don't reply to OPTIONS - avoids being used as a UDP reflector
+            # (spoofed source IPs would cause us to send responses to victims)
+            return
         elif msg.method == 'REGISTER':
             # Challenge for credentials
             if not creds.get('response'):
@@ -826,8 +827,8 @@ class SIPProtocol(asyncio.DatagramProtocol):
                     }
                     asyncio.create_task(self.log_callback(cred_entry))
         else:
-            # For other methods, send OK
-            response = self.honeypot.generate_ok_response(msg, addr)
+            # Don't reply to unknown methods - avoids reflection
+            return
 
         self.transport.sendto(response, addr)
 
