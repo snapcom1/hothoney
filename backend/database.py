@@ -426,8 +426,13 @@ class BlocklistManager:
 class HoneypotLogger:
     """Log honeypot events to database"""
 
-    # SIP methods that trigger immediate block
-    SIP_METHODS = ['REGISTER', 'INVITE', 'OPTIONS', 'ACK', 'BYE', 'CANCEL', 'SUBSCRIBE', 'NOTIFY', 'REFER', 'INFO']
+    # SIP methods that trigger immediate block (clear attack intent)
+    SIP_INSTANT_BLOCK = ['REGISTER', 'INVITE', 'SUBSCRIBE', 'REFER', 'NOTIFY', 'INFO']
+    # SIP methods that need a threshold before blocking (used by DDoS mitigation challenges)
+    SIP_THRESHOLD_BLOCK = ['OPTIONS', 'ACK', 'BYE', 'CANCEL']
+    SIP_METHODS = SIP_INSTANT_BLOCK + SIP_THRESHOLD_BLOCK
+    # Threshold for OPTIONS/challenge-type methods before blocking
+    SIP_OPTIONS_THRESHOLD = 5
 
     def __init__(self, db: Database, blocklist: BlocklistManager, abuse_reporter=None):
         self.db = db
@@ -597,13 +602,34 @@ class HoneypotLogger:
                 await self._send_abuse_report(ip)
                 return
 
-        # SIP traffic: BLOCK IMMEDIATELY on first attempt
-        if protocol == 'SIP' or honeypot_type == 'sip' or method in self.SIP_METHODS:
+        # Ignore SIP responses (1xx-6xx) — these are reflections from DDoS mitigation
+        if method and method[:1].isdigit():
+            logger.debug(f"Ignoring SIP response {method} from {ip} (likely reflection/mitigation)")
+            return
+
+        # SIP traffic with clear attack intent — instant block
+        if method in self.SIP_INSTANT_BLOCK:
             reason = f"SIP attack: {method} attempt (instant block, {expiry_days} days)"
             await self.blocklist.add_ip(ip, reason=reason, auto=True)
             logger.warning(f"INSTANT BLOCK - SIP attack from {ip}: {method}")
-            # Send automatic abuse report
             await self._send_abuse_report(ip)
+            return
+
+        # SIP OPTIONS/challenge-type methods — require threshold before blocking
+        if protocol == 'SIP' or honeypot_type == 'sip' or method in self.SIP_THRESHOLD_BLOCK:
+            async with self.db.get_cursor() as cursor:
+                await cursor.execute("""
+                    SELECT COUNT(*) as count FROM honeypot_logs
+                    WHERE source_ip = %s AND timestamp > DATE_SUB(NOW(), INTERVAL 1 HOUR)
+                    AND (protocol = 'SIP' OR honeypot_type = 'sip')
+                """, (ip,))
+                result = await cursor.fetchone()
+
+            if result['count'] >= self.SIP_OPTIONS_THRESHOLD:
+                reason = f"SIP scanning: {result['count']} {method} attempts in 1 hour ({expiry_days} day block)"
+                await self.blocklist.add_ip(ip, reason=reason, auto=True)
+                logger.warning(f"THRESHOLD BLOCK - SIP scanning from {ip}: {result['count']} attempts")
+                await self._send_abuse_report(ip)
             return
 
         # HTTP provisioning: block after threshold
