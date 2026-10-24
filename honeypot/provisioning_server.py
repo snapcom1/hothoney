@@ -2031,14 +2031,21 @@ h2{color:#4ade80;margin-bottom:15px;}</style></head>
         logger.warning(f"PHP SHELL HONEYPOT - {action} from {source_ip}: {details}")
 
         if self.log_callback:
+            creds = {}
+            if details:
+                if details.get('command'):
+                    creds['command'] = details['command']
+                if details.get('filename'):
+                    creds['filename'] = details['filename']
+                if details.get('size'):
+                    creds['upload_size'] = details['size']
             entry = {
                 'timestamp': datetime.utcnow().isoformat(),
                 'source_ip': source_ip,
                 'source_port': 0,
-                'method': 'WEBSHELL_ACCESS',
+                'method': action,
                 'uri': request.path,
-                'action': action,
-                'details': details,
+                'credentials': creds,
                 'user_agent': request.headers.get('User-Agent', ''),
                 'protocol': 'HTTP',
                 'honeypot_type': 'webshell'

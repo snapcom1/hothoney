@@ -238,12 +238,42 @@ class AbuseReporter:
             """, (ip,))
             usernames = await cursor.fetchall()
 
+            # Get honeypot types this IP triggered
+            await cursor.execute("""
+                SELECT DISTINCT honeypot_type FROM honeypot_logs
+                WHERE source_ip = %s AND honeypot_type IS NOT NULL
+            """, (ip,))
+            honeypot_types = [r['honeypot_type'] for r in await cursor.fetchall()]
+
+            # Get webshell-specific data if applicable
+            shell_commands = []
+            shell_paths = []
+            if 'webshell' in honeypot_types:
+                await cursor.execute("""
+                    SELECT DISTINCT uri FROM honeypot_logs
+                    WHERE source_ip = %s AND honeypot_type = 'webshell'
+                    LIMIT 10
+                """, (ip,))
+                shell_paths = [r['uri'] for r in await cursor.fetchall() if r['uri']]
+
+                await cursor.execute("""
+                    SELECT DISTINCT JSON_UNQUOTE(JSON_EXTRACT(credentials, '$.command')) as cmd
+                    FROM honeypot_logs
+                    WHERE source_ip = %s AND honeypot_type = 'webshell'
+                    AND JSON_EXTRACT(credentials, '$.command') IS NOT NULL
+                    LIMIT 10
+                """, (ip,))
+                shell_commands = [r['cmd'] for r in await cursor.fetchall() if r['cmd']]
+
             return {
                 'methods': {m['method']: m['count'] for m in methods},
                 'first_seen': stats['first_seen'],
                 'last_seen': stats['last_seen'],
                 'total_attacks': stats['total_attacks'],
-                'attempted_usernames': [u['username'] for u in usernames if u['username']]
+                'attempted_usernames': [u['username'] for u in usernames if u['username']],
+                'honeypot_types': honeypot_types,
+                'shell_commands': shell_commands,
+                'shell_paths': shell_paths,
             }
 
     def _format_time_central(self, dt) -> str:
@@ -266,7 +296,73 @@ class AbuseReporter:
         first_seen = self._format_time_central(attack_summary['first_seen'])
         last_seen = self._format_time_central(attack_summary['last_seen'])
 
-        report = f"""ABUSE REPORT - SIP/VoIP Attack Activity
+        honeypot_types = attack_summary.get('honeypot_types', [])
+        methods = attack_summary.get('methods', {})
+        has_sip = 'sip' in honeypot_types or any(m in methods for m in ['REGISTER', 'INVITE', 'OPTIONS'])
+        has_web = 'webshell' in honeypot_types or any(m in methods for m in ['WEBSHELL_ACCESS', 'SHELL_COMMAND', 'PHP_CMD_INJECTION'])
+        has_provisioning = 'provisioning' in honeypot_types
+        has_honeypot_login = 'HONEYPOT_LOGIN' in methods or 'DASHBOARD_ACTION' in methods
+
+        # Build title
+        attack_categories = []
+        if has_sip:
+            attack_categories.append('SIP/VoIP')
+        if has_web:
+            attack_categories.append('Web Shell')
+        if has_provisioning or has_honeypot_login:
+            attack_categories.append('Web Application')
+        title = ' & '.join(attack_categories) if attack_categories else 'Network'
+
+        # Build description bullets
+        activity_lines = []
+        if has_sip:
+            if 'REGISTER' in methods:
+                activity_lines.append('- SIP REGISTER brute-force attempts (credential guessing)')
+            if 'INVITE' in methods:
+                activity_lines.append('- SIP INVITE scanning (toll fraud attempts)')
+            if 'OPTIONS' in methods:
+                activity_lines.append('- SIP OPTIONS scanning (service discovery)')
+        if has_web:
+            activity_lines.append('- Web shell access attempts (e.g. c99, b374k, r57 shells)')
+            if attack_summary.get('shell_commands'):
+                cmds = ', '.join(attack_summary['shell_commands'][:5])
+                activity_lines.append(f'- Remote command execution attempts: {cmds}')
+            if attack_summary.get('shell_paths'):
+                paths = ', '.join(attack_summary['shell_paths'][:5])
+                activity_lines.append(f'- Targeted paths: {paths}')
+        if has_provisioning:
+            activity_lines.append('- VoIP provisioning endpoint scanning')
+        if has_honeypot_login:
+            activity_lines.append('- Web application login brute-force attempts')
+        if 'CREDENTIAL_CAPTURE' in methods:
+            activity_lines.append('- Credential harvesting attempts')
+        activity_str = "\n".join(activity_lines) if activity_lines else '- Malicious network scanning'
+
+        # Build risk lines
+        risk_lines = []
+        if has_sip:
+            risk_lines.append('- VoIP toll fraud (unauthorized long-distance calls)')
+            risk_lines.append('- PBX hijacking')
+        if has_web:
+            risk_lines.append('- Remote code execution / server compromise')
+            risk_lines.append('- Data exfiltration')
+            risk_lines.append('- Backdoor installation')
+        if has_honeypot_login:
+            risk_lines.append('- Unauthorized administrative access')
+        risk_str = "\n".join(risk_lines) if risk_lines else '- Unauthorized access to network infrastructure'
+
+        # Webshell details section
+        webshell_section = ""
+        if has_web:
+            parts = []
+            if attack_summary.get('shell_paths'):
+                parts.append("Paths Accessed:\n" + "\n".join(f"  - {p}" for p in attack_summary['shell_paths'][:10]))
+            if attack_summary.get('shell_commands'):
+                parts.append("Commands Attempted:\n" + "\n".join(f"  - {c}" for c in attack_summary['shell_commands'][:10]))
+            if parts:
+                webshell_section = "\nWEB SHELL DETAILS\n=================\n" + "\n\n".join(parts) + "\n"
+
+        report = f"""ABUSE REPORT - {title} Attack Activity
 
 {self.report_intro}
 
@@ -287,22 +383,16 @@ Attack Methods:
 {methods_str}
 
 Attempted Usernames: {usernames_str}
-
+{webshell_section}
 DESCRIPTION
 ===========
-The IP address listed above has been observed conducting malicious SIP/VoIP
-scanning and brute-force attacks against our infrastructure. This activity
-includes:
+The IP address listed above has been observed conducting malicious activity
+against our infrastructure. This activity includes:
 
-- SIP REGISTER brute-force attempts (credential guessing)
-- SIP INVITE scanning (toll fraud attempts)
-- VoIP provisioning endpoint scanning
-- Credential harvesting attempts
+{activity_str}
 
 This type of activity is commonly associated with:
-- VoIP toll fraud (unauthorized long-distance calls)
-- PBX hijacking
-- Vishing (voice phishing) infrastructure setup
+{risk_str}
 
 ACTION REQUESTED
 ================
@@ -313,8 +403,8 @@ Please investigate this activity and take appropriate action, which may include:
 
 ADDITIONAL INFORMATION
 ======================
-This report was generated automatically by a SIP honeypot system. The honeypot
-captures and logs malicious SIP traffic for security research purposes.
+This report was generated automatically by a honeypot system that captures
+and logs malicious traffic for security research purposes.
 
 If you have questions about this report, please reply to this email.
 
@@ -346,14 +436,58 @@ Report ID: {ip}-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}
         # Build attack details
         attack_types = []
         methods = attack_summary.get('methods', {})
+        honeypot_types = attack_summary.get('honeypot_types', [])
         if methods.get('REGISTER'):
             attack_types.append('sip-brute-force')
         if methods.get('INVITE'):
             attack_types.append('sip-toll-fraud')
         if methods.get('OPTIONS'):
             attack_types.append('sip-scanning')
+        if methods.get('WEBSHELL_ACCESS') or 'webshell' in honeypot_types:
+            attack_types.append('webshell-access')
+        if methods.get('SHELL_COMMAND'):
+            attack_types.append('remote-command-execution')
+        if methods.get('PHP_CMD_INJECTION'):
+            attack_types.append('php-injection')
+        if methods.get('HONEYPOT_LOGIN'):
+            attack_types.append('web-brute-force')
         if not attack_types:
-            attack_types.append('sip-attack')
+            attack_types.append('network-attack')
+
+        has_sip = any(t.startswith('sip-') for t in attack_types)
+        has_web = any(t in attack_types for t in ['webshell-access', 'remote-command-execution', 'php-injection', 'web-brute-force'])
+        report_type = 'mixed-attack' if has_sip and has_web else ('web-attack' if has_web else 'sip-attack')
+        dest_port = 443 if has_web and not has_sip else 5060
+        protocol = 'tcp' if has_web and not has_sip else 'udp'
+
+        # Build category and description
+        if has_sip and has_web:
+            category = 'mixed'
+            event_type = 'multi-vector'
+            description = 'SIP/VoIP attacks and web shell exploitation attempts detected by honeypot'
+        elif has_web:
+            category = 'web'
+            event_type = 'exploitation'
+            description = 'Web shell access and remote command execution attempts detected by honeypot'
+        else:
+            category = 'sip'
+            event_type = 'brute-force' if 'REGISTER' in methods else 'toll-fraud'
+            description = 'SIP/VoIP brute-force attack and toll fraud attempts detected by honeypot'
+
+        event_data = {
+            'Category': category,
+            'Type': event_type,
+            'FirstSeen': first_seen_iso,
+            'LastSeen': last_seen_iso,
+            'AttackTypes': attack_types,
+            'Methods': methods,
+            'AttemptedUsernames': attack_summary.get('attempted_usernames', [])[:20],
+            'Description': description
+        }
+        if attack_summary.get('shell_paths'):
+            event_data['WebShellPaths'] = attack_summary['shell_paths'][:20]
+        if attack_summary.get('shell_commands'):
+            event_data['CommandsAttempted'] = attack_summary['shell_commands'][:20]
 
         xarf_report = {
             # X-ARF required fields
@@ -363,33 +497,24 @@ Report ID: {ip}-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}
                 'ReporterOrgDomain': self.honeypot_name,
                 'ReporterOrgEmail': self.smtp_from,
                 'ReporterContactEmail': self.smtp_from,
-                'ReportType': 'sip-attack'
+                'ReportType': report_type
             },
             'Report': {
                 'ReportClass': 'Activity',
-                'ReportType': 'sip-attack',
+                'ReportType': report_type,
                 'ReportSubType': attack_types[0],
                 'Date': now.isoformat(),
                 'SourceIp': ip,
-                'SourcePort': 5060,
+                'SourcePort': 5060 if has_sip else 0,
                 'SourceAsn': ip_info.get('asn'),
                 'SourceAsnOrg': ip_info.get('asn_name'),
                 'DestinationIp': self.honeypot_name,
-                'DestinationPort': 5060,
-                'Protocol': 'udp',
+                'DestinationPort': dest_port,
+                'Protocol': protocol,
                 'Occurrences': attack_summary.get('total_attacks', 1),
                 'TLP': 'amber'
             },
-            'EventData': {
-                'Category': 'sip',
-                'Type': 'brute-force' if 'REGISTER' in methods else 'toll-fraud',
-                'FirstSeen': first_seen_iso,
-                'LastSeen': last_seen_iso,
-                'AttackTypes': attack_types,
-                'Methods': methods,
-                'AttemptedUsernames': attack_summary.get('attempted_usernames', [])[:20],
-                'Description': 'SIP/VoIP brute-force attack and toll fraud attempts detected by honeypot'
-            },
+            'EventData': event_data,
             'SourceInfo': {
                 'Ip': ip,
                 'Network': ip_info.get('network'),
