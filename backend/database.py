@@ -658,24 +658,28 @@ class HoneypotLogger:
         - Provisioning endpoint access (targeted recon)
         """
         async with self.db.get_cursor() as cursor:
-            # Check for credential attempts
+            # Check for real credential attempts (must have auth response or CREDENTIAL_CAPTURE)
             await cursor.execute("""
                 SELECT COUNT(*) as count FROM honeypot_logs
                 WHERE source_ip = %s
-                AND credentials IS NOT NULL
-                AND JSON_EXTRACT(credentials, '$.username') IS NOT NULL
+                AND (
+                    method = 'CREDENTIAL_CAPTURE'
+                    OR (credentials IS NOT NULL
+                        AND JSON_EXTRACT(credentials, '$.response') IS NOT NULL)
+                )
             """, (ip,))
             cred_result = await cursor.fetchone()
             if cred_result['count'] > 0:
                 return True
 
-            # Check for multiple distinct methods
+            # Check for multiple distinct methods (OPTIONS-only is likely reflection)
             await cursor.execute("""
                 SELECT COUNT(DISTINCT method) as methods FROM honeypot_logs
                 WHERE source_ip = %s
+                AND method != 'OPTIONS'
             """, (ip,))
             method_result = await cursor.fetchone()
-            if method_result['methods'] >= 2:
+            if method_result['methods'] >= 1:
                 return True
 
             # Check for provisioning/webshell honeypot access
