@@ -659,12 +659,15 @@ class HoneypotLogger:
         """
         async with self.db.get_cursor() as cursor:
             # Check for real credential attempts (must have auth response or CREDENTIAL_CAPTURE)
+            # JSON null vs SQL NULL: JSON_EXTRACT returns JSON null for {"response": null},
+            # which IS NOT NULL in SQL. Use JSON_TYPE to distinguish.
             await cursor.execute("""
                 SELECT COUNT(*) as count FROM honeypot_logs
                 WHERE source_ip = %s
                 AND (
                     method = 'CREDENTIAL_CAPTURE'
                     OR (credentials IS NOT NULL
+                        AND JSON_TYPE(JSON_EXTRACT(credentials, '$.response')) != 'NULL'
                         AND JSON_EXTRACT(credentials, '$.response') IS NOT NULL)
                 )
             """, (ip,))
