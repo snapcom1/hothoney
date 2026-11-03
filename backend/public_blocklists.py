@@ -405,12 +405,12 @@ class PublicBlocklistManager:
                                 break
 
                             batch_count += 1
-                            if batch_count >= 10:
+                            if batch_count >= 5:
                                 logger.info(f"APIBAN: Imported {imported} IPs, waiting for rate limit reset...")
-                                await asyncio.sleep(120)
+                                await asyncio.sleep(300)
                                 batch_count = 0
                             else:
-                                await asyncio.sleep(1)
+                                await asyncio.sleep(3)
 
                         elif resp.status == 404:
                             break

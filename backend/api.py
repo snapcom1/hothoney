@@ -1469,7 +1469,7 @@ class HoneypotAPI:
             return json_response({'error': str(e)}, status=500)
 
     async def auto_sync_blocklists(self):
-        """Background task to auto-sync all public blocklists every 5 minutes"""
+        """Background task to auto-sync all public blocklists every 15 minutes"""
         await asyncio.sleep(30)
 
         sync_count = 0
@@ -1487,7 +1487,7 @@ class HoneypotAPI:
 
                 # Hourly tasks: APIBAN cleanup + purge old entries
                 sync_count += 1
-                if sync_count >= 12:
+                if sync_count >= 4:
                     sync_count = 0
 
                     config = await self.public_blocklist_mgr.get_config('apiban')
@@ -1503,7 +1503,7 @@ class HoneypotAPI:
             except Exception as e:
                 logger.error(f"Auto-sync error: {e}")
 
-            await asyncio.sleep(300)
+            await asyncio.sleep(900)
 
     # Frontend serving
     async def serve_index(self, request):
