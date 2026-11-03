@@ -30,11 +30,11 @@ class PublicBlocklistManager:
         },
         'crowdsec': {
             'name': 'CrowdSec',
-            'description': 'Community-driven threat intelligence (SIP blocklist)',
+            'description': 'Community-driven threat intelligence blocklist',
             'url': 'https://app.crowdsec.net',
-            'list_url': 'https://cti.api.crowdsec.net/v2/fire',
-            'requires_key': True,
-            'type': 'api',
+            'list_url': 'https://raw.githubusercontent.com/crowdsecurity/crowdsec-cloud-blocklists/main/plain_text/crowdsec-ip-blocklist.txt',
+            'requires_key': False,
+            'type': 'url_list',
         },
         'opendbl': {
             'name': 'OpenDBL',
@@ -342,74 +342,16 @@ class PublicBlocklistManager:
     # ==================== CrowdSec ====================
 
     async def sync_crowdsec(self) -> Dict:
-        """Sync with CrowdSec CTI smoke dataset (SIP-related)"""
+        """Sync with CrowdSec community blocklist (free, no API key needed)"""
         config = await self.get_config('crowdsec')
         if not config or not config['enabled']:
             return {'success': False, 'error': 'CrowdSec not enabled'}
 
-        api_key = config['api_key']
-        if not api_key:
-            return {'success': False, 'error': 'CrowdSec API key not configured'}
-
-        imported = 0
-        try:
-            headers = {
-                'User-Agent': 'SIP-Honeypot/1.0',
-                'x-api-key': api_key,
-                'Accept': 'application/json'
-            }
-
-            async with aiohttp.ClientSession() as session:
-                # CrowdSec CTI Fire API - get SIP-related IPs
-                url = "https://cti.api.crowdsec.net/v2/fire"
-                params = {'page': 1, 'limit': 1000}
-
-                async with session.get(url, headers=headers, params=params, timeout=60) as resp:
-                    if resp.status == 200:
-                        data = await resp.json()
-                        items = data.get('items', [])
-                        for item in items:
-                            ip = item.get('ip')
-                            if not ip:
-                                continue
-                            # Check if this IP has SIP/VoIP related classifications
-                            behaviors = [b.get('name', '') for b in item.get('behaviors', [])]
-                            classifications = item.get('classifications', {})
-                            class_list = [c.get('name', '') for c in classifications.get('classifications', [])]
-
-                            is_sip = any('sip' in b.lower() or 'voip' in b.lower() for b in behaviors + class_list)
-                            is_scan = any('scan' in b.lower() or 'brute' in b.lower() for b in behaviors)
-
-                            if is_sip or is_scan:
-                                await self._import_ip(ip, 'crowdsec')
-                                imported += 1
-                    elif resp.status == 401 or resp.status == 403:
-                        raise Exception("Invalid or unauthorized API key")
-                    elif resp.status == 429:
-                        raise Exception("Rate limited - try again later")
-                    else:
-                        raise Exception(f"API returned status {resp.status}")
-
-            async with self.db.get_cursor() as cursor:
-                await cursor.execute("""
-                    UPDATE public_blocklist_config
-                    SET last_sync = NOW(), ips_imported = ips_imported + %s, last_error = NULL
-                    WHERE list_id = 'crowdsec'
-                """, (imported,))
-
-            logger.info(f"CrowdSec sync complete: {imported} SIP/scan IPs imported")
-            return {'success': True, 'imported': imported}
-
-        except Exception as e:
-            error_msg = str(e)
-            async with self.db.get_cursor() as cursor:
-                await cursor.execute("""
-                    UPDATE public_blocklist_config
-                    SET last_error = %s, updated_at = NOW()
-                    WHERE list_id = 'crowdsec'
-                """, (error_msg,))
-            logger.error(f"CrowdSec sync failed: {error_msg}")
-            return {'success': False, 'error': error_msg}
+        return await self.sync_url_list(
+            'crowdsec',
+            'https://raw.githubusercontent.com/crowdsecurity/crowdsec-cloud-blocklists/main/plain_text/crowdsec-ip-blocklist.txt',
+            name='CrowdSec'
+        )
 
     # ==================== OpenDBL ====================
 
