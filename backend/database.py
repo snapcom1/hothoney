@@ -293,11 +293,10 @@ class BlocklistManager:
         """Get list of blocked IPs (excludes expired IPs based on settings)"""
         expiry_days = await self._get_expiry_days()
         async with self.db.get_cursor() as cursor:
-            # Join with public_blocklist_ips to check if IP is also in APIBAN
             query = """
                 SELECT b.*,
-                       (SELECT COUNT(*) FROM public_blocklist_ips p
-                        WHERE p.ip_address = b.ip_address AND p.list_id = 'apiban') > 0 AS in_apiban
+                       EXISTS(SELECT 1 FROM public_blocklist_ips p
+                              WHERE p.ip_address = b.ip_address) AS in_external
                 FROM blocked_ips b
             """
             conditions = []
@@ -305,14 +304,14 @@ class BlocklistManager:
             if active_only:
                 conditions.append(f"b.active = TRUE AND b.last_seen >= DATE_SUB(NOW(), INTERVAL {expiry_days} DAY)")
             if source_filter == 'external':
-                conditions.append("b.added_by IN ('apiban')")
+                conditions.append("""EXISTS (SELECT 1 FROM public_blocklist_ips p
+                    WHERE p.ip_address = b.ip_address)""")
             elif source_filter == 'internal':
-                conditions.append("(b.added_by IS NULL OR b.added_by NOT IN ('apiban'))")
+                conditions.append("""NOT EXISTS (SELECT 1 FROM public_blocklist_ips p
+                    WHERE p.ip_address = b.ip_address)""")
             elif source_filter == 'both':
-                # IPs that are internal but also exist in APIBAN
-                conditions.append("""(b.added_by IS NULL OR b.added_by NOT IN ('apiban'))
-                    AND EXISTS (SELECT 1 FROM public_blocklist_ips p
-                                WHERE p.ip_address = b.ip_address AND p.list_id = 'apiban')""")
+                conditions.append("""EXISTS (SELECT 1 FROM public_blocklist_ips p
+                    WHERE p.ip_address = b.ip_address)""")
             if search:
                 conditions.append("(b.ip_address LIKE %s OR b.reason LIKE %s)")
                 search_pattern = f"%{search}%"
@@ -334,14 +333,14 @@ class BlocklistManager:
             if active_only:
                 conditions.append(f"active = TRUE AND last_seen >= DATE_SUB(NOW(), INTERVAL {expiry_days} DAY)")
             if source_filter == 'external':
-                conditions.append("added_by IN ('apiban')")
+                conditions.append("""EXISTS (SELECT 1 FROM public_blocklist_ips p
+                    WHERE p.ip_address = blocked_ips.ip_address)""")
             elif source_filter == 'internal':
-                conditions.append("(added_by IS NULL OR added_by NOT IN ('apiban'))")
+                conditions.append("""NOT EXISTS (SELECT 1 FROM public_blocklist_ips p
+                    WHERE p.ip_address = blocked_ips.ip_address)""")
             elif source_filter == 'both':
-                # IPs that are internal but also exist in APIBAN
-                conditions.append("""(added_by IS NULL OR added_by NOT IN ('apiban'))
-                    AND EXISTS (SELECT 1 FROM public_blocklist_ips p
-                                WHERE p.ip_address = blocked_ips.ip_address AND p.list_id = 'apiban')""")
+                conditions.append("""EXISTS (SELECT 1 FROM public_blocklist_ips p
+                    WHERE p.ip_address = blocked_ips.ip_address)""")
             if search:
                 conditions.append("(ip_address LIKE %s OR reason LIKE %s)")
                 search_pattern = f"%{search}%"

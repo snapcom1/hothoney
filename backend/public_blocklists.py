@@ -532,11 +532,7 @@ class PublicBlocklistManager:
     # ==================== Shared helpers ====================
 
     async def _import_ip(self, ip: str, list_id: str):
-        """Import an IP from a public blocklist"""
-        name = self.BLOCKLISTS.get(list_id, {}).get('name', list_id)
-        reason = f"Public blocklist: {name}"
-        await self.blocklist.add_ip(ip, reason=reason, auto=True, added_by=list_id)
-
+        """Import an IP from a public blocklist (external tracking only, not internal blocklist)"""
         async with self.db.get_cursor() as cursor:
             await cursor.execute("""
                 INSERT IGNORE INTO public_blocklist_ips (ip_address, list_id)

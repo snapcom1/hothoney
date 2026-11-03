@@ -867,6 +867,21 @@ class HoneypotAPI:
             return json_response({'error': 'Failed to delete user'}, status=404)
 
     # Public endpoints (no auth required)
+    async def _get_all_blocked_ips(self, limit=10000):
+        """Get combined internal blocklist + external public blocklist IPs (deduplicated)"""
+        internal = await self.blocklist.get_blocked_ips(active_only=True, limit=limit)
+        internal_set = {ip['ip_address'] for ip in internal}
+        ip_list = [ip['ip_address'] for ip in internal]
+
+        async with self.blocklist.db.get_cursor() as cursor:
+            await cursor.execute("SELECT DISTINCT ip_address FROM public_blocklist_ips")
+            rows = await cursor.fetchall()
+            for row in rows:
+                if row['ip_address'] not in internal_set:
+                    ip_list.append(row['ip_address'])
+
+        return ip_list
+
     def _split_ips_by_version(self, ips):
         """Split IPs into IPv4 and IPv6 lists"""
         ipv4 = []
@@ -881,13 +896,13 @@ class HoneypotAPI:
 
     async def public_blocklist(self, request):
         """Public JSON blocklist"""
-        ips = await self.blocklist.get_blocked_ips(active_only=True, limit=10000)
+        ips = await self._get_all_blocked_ips()
         ipv4, ipv6 = self._split_ips_by_version(ips)
         return json_response({
             'count': len(ips),
             'ipv4_count': len(ipv4),
             'ipv6_count': len(ipv6),
-            'ips': [ip['ip_address'] for ip in ips],
+            'ips': ips,
             'ipv4': ipv4,
             'ipv6': ipv6,
             'updated': datetime.utcnow().isoformat()
@@ -895,9 +910,9 @@ class HoneypotAPI:
 
     async def public_blocklist_txt(self, request):
         """Public plain text blocklist (one IP per line) - all IPs"""
-        ips = await self.blocklist.get_blocked_ips(active_only=True, limit=10000)
+        ips = await self._get_all_blocked_ips()
         ipv4, ipv6 = self._split_ips_by_version(ips)
-        ip_list = '\n'.join(ip['ip_address'] for ip in ips)
+        ip_list = '\n'.join(ips)
         return web.Response(
             text=f"# SIP Honeypot Blocklist - hothoney.snapcom.com\n# Updated: {datetime.utcnow().isoformat()}\n# Total: {len(ips)} (IPv4: {len(ipv4)}, IPv6: {len(ipv6)})\n\n{ip_list}\n",
             content_type='text/plain'
@@ -905,7 +920,7 @@ class HoneypotAPI:
 
     async def public_blocklist_ipv4(self, request):
         """Public plain text blocklist - IPv4 only"""
-        ips = await self.blocklist.get_blocked_ips(active_only=True, limit=10000)
+        ips = await self._get_all_blocked_ips()
         ipv4, _ = self._split_ips_by_version(ips)
         ip_list = '\n'.join(ipv4)
         return web.Response(
@@ -915,7 +930,7 @@ class HoneypotAPI:
 
     async def public_blocklist_ipv6(self, request):
         """Public plain text blocklist - IPv6 only"""
-        ips = await self.blocklist.get_blocked_ips(active_only=True, limit=10000)
+        ips = await self._get_all_blocked_ips()
         _, ipv6 = self._split_ips_by_version(ips)
         ip_list = '\n'.join(ipv6)
         return web.Response(
@@ -928,7 +943,7 @@ class HoneypotAPI:
         list_name = request.query.get('list', 'honeypot')
         timeout = request.query.get('timeout', '06:00:00')
 
-        ips = await self.blocklist.get_blocked_ips(active_only=True, limit=10000)
+        ips = await self._get_all_blocked_ips()
         ipv4, ipv6 = self._split_ips_by_version(ips)
 
         timeout_str = f' timeout={timeout}' if timeout else ''
@@ -959,7 +974,7 @@ class HoneypotAPI:
 
     async def public_cloudflare_list(self, request):
         """Cloudflare-compatible IP list - one IP/CIDR per line, no comments, no blanks"""
-        ips = await self.blocklist.get_blocked_ips(active_only=True, limit=10000)
+        ips = await self._get_all_blocked_ips()
         ipv4, _ = self._split_ips_by_version(ips)
         ip_list = '\n'.join(f"{ip}/32" if '/' not in ip else ip for ip in ipv4)
         return web.Response(
@@ -970,7 +985,7 @@ class HoneypotAPI:
 
     async def public_juniper_feed(self, request):
         """Juniper SRX dynamic address feed format - clean IP list with prefix"""
-        ips = await self.blocklist.get_blocked_ips(active_only=True, limit=10000)
+        ips = await self._get_all_blocked_ips()
         ipv4, ipv6 = self._split_ips_by_version(ips)
 
         # Juniper format: IP/prefix, one per line, no comments
@@ -994,7 +1009,7 @@ class HoneypotAPI:
 
     async def public_juniper_prefixlist(self, request):
         """Juniper prefix-list configuration format for firewall filters"""
-        ips = await self.blocklist.get_blocked_ips(active_only=True, limit=10000)
+        ips = await self._get_all_blocked_ips()
         ipv4, ipv6 = self._split_ips_by_version(ips)
 
         # Get optional prefix-list name from query param, default to HONEYPOT-BLOCKLIST
