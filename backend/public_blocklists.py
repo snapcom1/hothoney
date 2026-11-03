@@ -30,7 +30,7 @@ class PublicBlocklistManager:
         },
         'crowdsec': {
             'name': 'CrowdSec',
-            'description': 'Community-driven threat intelligence (requires Console account)',
+            'description': 'Community-driven threat intelligence (CTI API key)',
             'url': 'https://app.crowdsec.net',
             'requires_key': True,
             'type': 'api',
@@ -461,55 +461,63 @@ class PublicBlocklistManager:
 
     # ==================== CrowdSec ====================
 
+    CROWDSEC_SYNC_INTERVAL = 10800  # 3 hours in seconds
+
     async def sync_crowdsec(self) -> Dict:
-        """Sync with CrowdSec - supports Service API key or Console blocklist URL"""
+        """Sync with CrowdSec CTI smoke dataset (throttled to every 3 hours)"""
         config = await self.get_config('crowdsec')
         if not config or not config['enabled']:
             return {'success': False, 'error': 'CrowdSec not enabled'}
 
         api_key = config['api_key']
         if not api_key:
-            return {'success': False, 'error': 'CrowdSec API key not configured'}
+            return {'success': False, 'error': 'CrowdSec CTI API key not configured'}
+
+        # Throttle: skip if last sync was less than 3 hours ago
+        if config.get('last_sync'):
+            last_sync = config['last_sync']
+            if isinstance(last_sync, str):
+                last_sync = datetime.fromisoformat(last_sync)
+            elapsed = (datetime.utcnow() - last_sync).total_seconds()
+            if elapsed < self.CROWDSEC_SYNC_INTERVAL:
+                remaining = int((self.CROWDSEC_SYNC_INTERVAL - elapsed) / 60)
+                return {'success': True, 'imported': 0, 'skipped': True,
+                        'message': f'Throttled - next sync in ~{remaining} min'}
 
         imported = 0
         try:
-            # Try Service API: list blocklists, then download each
             headers = {
                 'User-Agent': 'SIP-Honeypot/1.0',
                 'x-api-key': api_key,
             }
 
             async with aiohttp.ClientSession() as session:
-                # Get available blocklists
-                async with session.get(
-                    'https://admin.api.crowdsec.net/v1/blocklists',
-                    headers=headers, timeout=60
-                ) as resp:
-                    if resp.status == 401 or resp.status == 403:
-                        raise Exception("Invalid API key - create one in CrowdSec Console > Settings > Service API Keys")
-                    elif resp.status == 429:
-                        raise Exception("Rate limited - try again later")
-                    elif resp.status != 200:
-                        raise Exception(f"API returned status {resp.status}")
-
-                    data = await resp.json()
-                    blocklists = data.get('items', data) if isinstance(data, dict) else data
-
-                # Download each blocklist
-                for bl in blocklists:
-                    bl_id = bl.get('id') if isinstance(bl, dict) else None
-                    if not bl_id:
-                        continue
+                page = 1
+                while True:
                     async with session.get(
-                        f'https://admin.api.crowdsec.net/v1/blocklists/{bl_id}/download',
-                        headers=headers, timeout=60
+                        'https://cti.api.crowdsec.net/v2/smoke',
+                        headers=headers,
+                        params={'page': page, 'limit': 1000},
+                        timeout=60
                     ) as resp:
-                        if resp.status == 200:
-                            text = await resp.text()
-                            ips = self._parse_ip_list(text)
-                            for ip in ips:
-                                await self._import_ip(ip, 'crowdsec')
-                                imported += 1
+                        if resp.status == 403:
+                            raise Exception("Invalid CTI API key")
+                        elif resp.status == 429:
+                            raise Exception("Rate limited - try again later")
+                        elif resp.status != 200:
+                            raise Exception(f"API returned status {resp.status}")
+
+                        text = await resp.text()
+                        ips = self._parse_ip_list(text)
+                        if not ips:
+                            break
+                        for ip in ips:
+                            await self._import_ip(ip, 'crowdsec')
+                            imported += 1
+                        if len(ips) < 1000:
+                            break
+                        page += 1
+                        await asyncio.sleep(2)
 
             async with self.db.get_cursor() as cursor:
                 await cursor.execute("""
@@ -519,7 +527,7 @@ class PublicBlocklistManager:
                         last_sync = NOW(), ips_imported = ips_imported + VALUES(ips_imported), last_error = NULL
                 """, (imported,))
 
-            logger.info(f"CrowdSec sync complete: {imported} IPs imported")
+            logger.info(f"CrowdSec CTI sync complete: {imported} IPs imported")
             return {'success': True, 'imported': imported}
 
         except Exception as e:
