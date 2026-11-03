@@ -1412,8 +1412,6 @@ class HoneypotAPI:
         try:
             if list_id == 'apiban':
                 result = await self.public_blocklist_mgr.sync_apiban()
-            elif list_id == 'crowdsec':
-                result = await self.public_blocklist_mgr.sync_crowdsec()
             elif list_id == 'opendbl':
                 result = await self.public_blocklist_mgr.sync_opendbl()
             elif list_id.startswith('custom_'):
