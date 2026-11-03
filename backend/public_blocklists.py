@@ -462,16 +462,68 @@ class PublicBlocklistManager:
     # ==================== CrowdSec ====================
 
     async def sync_crowdsec(self) -> Dict:
-        """Sync with CrowdSec Console blocklist (basic auth, raw IP list)"""
+        """Sync with CrowdSec CTI API smoke dataset"""
         config = await self.get_config('crowdsec')
         if not config or not config['enabled']:
             return {'success': False, 'error': 'CrowdSec not enabled'}
 
         api_key = config['api_key']
         if not api_key:
-            return {'success': False, 'error': 'CrowdSec API key not configured. Enter your Console blocklist URL as the key.'}
+            return {'success': False, 'error': 'CrowdSec API key not configured'}
 
-        return await self.sync_url_list('crowdsec', api_key, name='CrowdSec')
+        imported = 0
+        try:
+            headers = {
+                'User-Agent': 'SIP-Honeypot/1.0',
+                'x-api-key': api_key,
+                'Accept': 'application/json'
+            }
+
+            async with aiohttp.ClientSession() as session:
+                page = 1
+                while True:
+                    url = "https://cti.api.crowdsec.net/v2/smoke"
+                    params = {'page': page, 'limit': 1000}
+                    async with session.get(url, headers=headers, params=params, timeout=60) as resp:
+                        if resp.status == 403:
+                            raise Exception("Invalid API key - get a free CTI key at https://app.crowdsec.net")
+                        elif resp.status == 429:
+                            raise Exception("Rate limited - try again later")
+                        elif resp.status != 200:
+                            raise Exception(f"API returned status {resp.status}")
+
+                        text = await resp.text()
+                        ips = self._parse_ip_list(text)
+                        if not ips:
+                            break
+                        for ip in ips:
+                            await self._import_ip(ip, 'crowdsec')
+                            imported += 1
+                        if len(ips) < 1000:
+                            break
+                        page += 1
+
+            async with self.db.get_cursor() as cursor:
+                await cursor.execute("""
+                    INSERT INTO public_blocklist_config (list_id, enabled, last_sync, ips_imported, last_error)
+                    VALUES ('crowdsec', TRUE, NOW(), %s, NULL)
+                    ON DUPLICATE KEY UPDATE
+                        last_sync = NOW(), ips_imported = ips_imported + VALUES(ips_imported), last_error = NULL
+                """, (imported,))
+
+            logger.info(f"CrowdSec sync complete: {imported} IPs imported")
+            return {'success': True, 'imported': imported}
+
+        except Exception as e:
+            error_msg = str(e)
+            async with self.db.get_cursor() as cursor:
+                await cursor.execute("""
+                    INSERT INTO public_blocklist_config (list_id, last_error)
+                    VALUES ('crowdsec', %s)
+                    ON DUPLICATE KEY UPDATE last_error = VALUES(last_error), updated_at = NOW()
+                """, (error_msg,))
+            logger.error(f"CrowdSec sync failed: {error_msg}")
+            return {'success': False, 'error': error_msg}
 
     # ==================== Shared helpers ====================
 
