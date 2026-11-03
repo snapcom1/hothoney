@@ -28,6 +28,13 @@ class PublicBlocklistManager:
             'requires_key': True,
             'type': 'api',
         },
+        'crowdsec': {
+            'name': 'CrowdSec',
+            'description': 'Community-driven threat intelligence (requires Console account)',
+            'url': 'https://app.crowdsec.net',
+            'requires_key': True,
+            'type': 'api',
+        },
         'opendbl': {
             'name': 'OpenDBL',
             'description': 'Open DNS blocklist - broad coverage IP list',
@@ -452,6 +459,20 @@ class PublicBlocklistManager:
             logger.error(f"APIBAN sync failed: {error_msg}")
             return {'success': False, 'error': error_msg}
 
+    # ==================== CrowdSec ====================
+
+    async def sync_crowdsec(self) -> Dict:
+        """Sync with CrowdSec Console blocklist (basic auth, raw IP list)"""
+        config = await self.get_config('crowdsec')
+        if not config or not config['enabled']:
+            return {'success': False, 'error': 'CrowdSec not enabled'}
+
+        api_key = config['api_key']
+        if not api_key:
+            return {'success': False, 'error': 'CrowdSec API key not configured. Enter your Console blocklist URL as the key.'}
+
+        return await self.sync_url_list('crowdsec', api_key, name='CrowdSec')
+
     # ==================== Shared helpers ====================
 
     async def _import_ip(self, ip: str, list_id: str):
@@ -586,6 +607,11 @@ class PublicBlocklistManager:
         config = await self.get_config('apiban')
         if config and config['enabled']:
             results['apiban'] = await self.sync_apiban()
+
+        # CrowdSec
+        config = await self.get_config('crowdsec')
+        if config and config['enabled']:
+            results['crowdsec'] = await self.sync_crowdsec()
 
         # OpenDBL
         config = await self.get_config('opendbl')
