@@ -1392,8 +1392,11 @@ class HoneypotAPI:
             data = await request.json()
             enabled = data.get('enabled', False)
             api_key = data.get('api_key', '')
+            sync_interval = data.get('sync_interval')
+            if sync_interval is not None:
+                sync_interval = int(sync_interval)
 
-            await self.public_blocklist_mgr.save_config(list_id, enabled, api_key)
+            await self.public_blocklist_mgr.save_config(list_id, enabled, api_key, sync_interval)
 
             return json_response({
                 'success': True,
@@ -1411,11 +1414,11 @@ class HoneypotAPI:
         list_id = request.match_info['list_id']
         try:
             if list_id == 'apiban':
-                result = await self.public_blocklist_mgr.sync_apiban()
+                result = await self.public_blocklist_mgr.sync_apiban(force=True)
             elif list_id == 'crowdsec':
-                result = await self.public_blocklist_mgr.sync_crowdsec()
+                result = await self.public_blocklist_mgr.sync_crowdsec(force=True)
             elif list_id == 'opendbl':
-                result = await self.public_blocklist_mgr.sync_opendbl()
+                result = await self.public_blocklist_mgr.sync_opendbl(force=True)
             elif list_id.startswith('custom_'):
                 custom = await self.public_blocklist_mgr._get_custom_list(list_id)
                 if not custom:

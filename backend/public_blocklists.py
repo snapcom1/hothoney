@@ -68,6 +68,20 @@ class PublicBlocklistManager:
                 )
             """)
 
+            # Add sync_interval column if missing
+            await cursor.execute("""
+                SELECT COUNT(*) as cnt FROM information_schema.COLUMNS
+                WHERE TABLE_SCHEMA = DATABASE()
+                AND TABLE_NAME = 'public_blocklist_config'
+                AND COLUMN_NAME = 'sync_interval'
+            """)
+            col = await cursor.fetchone()
+            if col['cnt'] == 0:
+                await cursor.execute("""
+                    ALTER TABLE public_blocklist_config
+                    ADD COLUMN sync_interval INT DEFAULT NULL
+                """)
+
             # Create tracking table for imported IPs
             await cursor.execute("""
                 CREATE TABLE IF NOT EXISTS public_blocklist_ips (
@@ -128,6 +142,7 @@ class PublicBlocklistManager:
                 'last_sync': config['last_sync'].isoformat() if config and config['last_sync'] else None,
                 'ips_imported': config['ips_imported'] if config else 0,
                 'last_error': config['last_error'] if config else None,
+                'sync_interval': config['sync_interval'] if config and config.get('sync_interval') else None,
             })
 
         # Add custom URL lists
@@ -150,10 +165,22 @@ class PublicBlocklistManager:
 
         return configs
 
-    async def save_config(self, list_id: str, enabled: bool, api_key: str = None):
+    DEFAULT_SYNC_INTERVALS = {
+        'crowdsec': 10800,  # 3 hours
+        'opendbl': 3600,    # 1 hour
+        'apiban': 900,      # 15 min
+    }
+
+    async def _get_sync_interval(self, list_id: str) -> int:
+        """Get sync interval for a list in seconds"""
+        config = await self.get_config(list_id)
+        if config and config.get('sync_interval'):
+            return config['sync_interval']
+        return self.DEFAULT_SYNC_INTERVALS.get(list_id, 900)
+
+    async def save_config(self, list_id: str, enabled: bool, api_key: str = None, sync_interval: int = None):
         """Save blocklist configuration"""
         if list_id not in self.BLOCKLISTS:
-            # Check if it's a custom list
             custom = await self._get_custom_list(list_id)
             if custom:
                 await self._update_custom_list(list_id, enabled=enabled, auth_header=api_key)
@@ -162,13 +189,14 @@ class PublicBlocklistManager:
 
         async with self.db.get_cursor() as cursor:
             await cursor.execute("""
-                INSERT INTO public_blocklist_config (list_id, enabled, api_key)
-                VALUES (%s, %s, %s)
+                INSERT INTO public_blocklist_config (list_id, enabled, api_key, sync_interval)
+                VALUES (%s, %s, %s, %s)
                 ON DUPLICATE KEY UPDATE
                     enabled = VALUES(enabled),
                     api_key = COALESCE(NULLIF(VALUES(api_key), ''), api_key),
+                    sync_interval = COALESCE(VALUES(sync_interval), sync_interval),
                     updated_at = CURRENT_TIMESTAMP
-            """, (list_id, enabled, api_key))
+            """, (list_id, enabled, api_key, sync_interval))
 
     # ==================== Custom URL Lists ====================
 
@@ -343,11 +371,23 @@ class PublicBlocklistManager:
 
     # ==================== OpenDBL ====================
 
-    async def sync_opendbl(self) -> Dict:
+    async def sync_opendbl(self, force=False) -> Dict:
         """Sync with OpenDBL broad coverage list"""
         config = await self.get_config('opendbl')
         if not config or not config['enabled']:
             return {'success': False, 'error': 'OpenDBL not enabled'}
+
+        if not force:
+            sync_interval = await self._get_sync_interval('opendbl')
+            if config.get('last_sync'):
+                last_sync = config['last_sync']
+                if isinstance(last_sync, str):
+                    last_sync = datetime.fromisoformat(last_sync)
+                elapsed = (datetime.utcnow() - last_sync).total_seconds()
+                if elapsed < sync_interval:
+                    remaining = int((sync_interval - elapsed) / 60)
+                    return {'success': True, 'imported': 0, 'skipped': True,
+                            'message': f'Throttled - next sync in ~{remaining} min'}
 
         return await self.sync_url_list(
             'opendbl',
@@ -357,7 +397,7 @@ class PublicBlocklistManager:
 
     # ==================== APIBAN ====================
 
-    async def sync_apiban(self) -> Dict:
+    async def sync_apiban(self, force=False) -> Dict:
         """Sync with APIBAN API"""
         config = await self.get_config('apiban')
         if not config or not config['enabled']:
@@ -366,6 +406,18 @@ class PublicBlocklistManager:
         api_key = config['api_key']
         if not api_key:
             return {'success': False, 'error': 'APIBAN API key not configured'}
+
+        if not force:
+            sync_interval = await self._get_sync_interval('apiban')
+            if config.get('last_sync'):
+                last_sync = config['last_sync']
+                if isinstance(last_sync, str):
+                    last_sync = datetime.fromisoformat(last_sync)
+                elapsed = (datetime.utcnow() - last_sync).total_seconds()
+                if elapsed < sync_interval:
+                    remaining = int((sync_interval - elapsed) / 60)
+                    return {'success': True, 'imported': 0, 'skipped': True,
+                            'message': f'Throttled - next sync in ~{remaining} min'}
 
         current_id = config['last_id'] or ''
         imported = 0
@@ -461,26 +513,25 @@ class PublicBlocklistManager:
 
     # ==================== CrowdSec ====================
 
-    CROWDSEC_SYNC_INTERVAL = 10800  # 3 hours in seconds
-
-    async def sync_crowdsec(self) -> Dict:
-        """Sync with CrowdSec CTI smoke dataset (throttled to every 3 hours)"""
+    async def sync_crowdsec(self, force=False) -> Dict:
+        """Sync with CrowdSec Service API blocklists"""
         config = await self.get_config('crowdsec')
         if not config or not config['enabled']:
             return {'success': False, 'error': 'CrowdSec not enabled'}
 
         api_key = config['api_key']
         if not api_key:
-            return {'success': False, 'error': 'CrowdSec CTI API key not configured'}
+            return {'success': False, 'error': 'CrowdSec API key not configured'}
 
-        # Throttle: skip if last sync was less than 3 hours ago
-        if config.get('last_sync'):
+        # Throttle based on configurable sync interval
+        sync_interval = await self._get_sync_interval('crowdsec')
+        if not force and config.get('last_sync'):
             last_sync = config['last_sync']
             if isinstance(last_sync, str):
                 last_sync = datetime.fromisoformat(last_sync)
             elapsed = (datetime.utcnow() - last_sync).total_seconds()
-            if elapsed < self.CROWDSEC_SYNC_INTERVAL:
-                remaining = int((self.CROWDSEC_SYNC_INTERVAL - elapsed) / 60)
+            if elapsed < sync_interval:
+                remaining = int((sync_interval - elapsed) / 60)
                 return {'success': True, 'imported': 0, 'skipped': True,
                         'message': f'Throttled - next sync in ~{remaining} min'}
 
@@ -492,32 +543,36 @@ class PublicBlocklistManager:
             }
 
             async with aiohttp.ClientSession() as session:
-                page = 1
-                while True:
-                    async with session.get(
-                        'https://cti.api.crowdsec.net/v2/smoke',
-                        headers=headers,
-                        params={'page': page, 'limit': 1000},
-                        timeout=60
-                    ) as resp:
-                        if resp.status == 403:
-                            raise Exception("Invalid CTI API key")
-                        elif resp.status == 429:
-                            raise Exception("Rate limited - try again later")
-                        elif resp.status != 200:
-                            raise Exception(f"API returned status {resp.status}")
+                # List available blocklists
+                async with session.get(
+                    'https://admin.api.crowdsec.net/v1/blocklists',
+                    headers=headers, timeout=60
+                ) as resp:
+                    if resp.status == 401 or resp.status == 403:
+                        raise Exception("Invalid API key - create one in CrowdSec Console > Settings > Service API Keys")
+                    elif resp.status == 429:
+                        raise Exception("Rate limited - try again later")
+                    elif resp.status != 200:
+                        raise Exception(f"API returned status {resp.status}")
 
-                        text = await resp.text()
-                        ips = self._parse_ip_list(text)
-                        if not ips:
-                            break
-                        for ip in ips:
-                            await self._import_ip(ip, 'crowdsec')
-                            imported += 1
-                        if len(ips) < 1000:
-                            break
-                        page += 1
-                        await asyncio.sleep(2)
+                    data = await resp.json()
+                    blocklists = data.get('items', data) if isinstance(data, dict) else data
+
+                # Download each blocklist
+                for bl in blocklists:
+                    bl_id = bl.get('id') if isinstance(bl, dict) else None
+                    if not bl_id:
+                        continue
+                    async with session.get(
+                        f'https://admin.api.crowdsec.net/v1/blocklists/{bl_id}/download',
+                        headers=headers, timeout=60
+                    ) as resp:
+                        if resp.status in (200, 206):
+                            text = await resp.text()
+                            ips = self._parse_ip_list(text)
+                            for ip in ips:
+                                await self._import_ip(ip, 'crowdsec')
+                                imported += 1
 
             async with self.db.get_cursor() as cursor:
                 await cursor.execute("""
@@ -527,7 +582,7 @@ class PublicBlocklistManager:
                         last_sync = NOW(), ips_imported = ips_imported + VALUES(ips_imported), last_error = NULL
                 """, (imported,))
 
-            logger.info(f"CrowdSec CTI sync complete: {imported} IPs imported")
+            logger.info(f"CrowdSec sync complete: {imported} IPs imported from {len(blocklists)} list(s)")
             return {'success': True, 'imported': imported}
 
         except Exception as e:

@@ -868,6 +868,20 @@ class HoneypotDashboard {
                                     Enable auto-sync
                                 </label>
                             </div>
+                            ${list.builtin ? `
+                            <div class="form-group">
+                                <label>Sync Interval</label>
+                                <select class="external-list-interval" data-list-id="${list.list_id}">
+                                    <option value="900" ${list.sync_interval == 900 ? 'selected' : ''}>15 min</option>
+                                    <option value="1800" ${list.sync_interval == 1800 ? 'selected' : ''}>30 min</option>
+                                    <option value="3600" ${list.sync_interval == 3600 || (!list.sync_interval && list.list_id != 'crowdsec') ? 'selected' : ''}>1 hour</option>
+                                    <option value="7200" ${list.sync_interval == 7200 ? 'selected' : ''}>2 hours</option>
+                                    <option value="10800" ${list.sync_interval == 10800 || (!list.sync_interval && list.list_id == 'crowdsec') ? 'selected' : ''}>3 hours</option>
+                                    <option value="21600" ${list.sync_interval == 21600 ? 'selected' : ''}>6 hours</option>
+                                    <option value="43200" ${list.sync_interval == 43200 ? 'selected' : ''}>12 hours</option>
+                                    <option value="86400" ${list.sync_interval == 86400 ? 'selected' : ''}>24 hours</option>
+                                </select>
+                            </div>` : ''}
                         </div>
                         <div class="button-group">
                             <button class="btn btn-small" onclick="app.saveExternalBlocklist('${list.list_id}')">Save</button>
@@ -893,11 +907,15 @@ class HoneypotDashboard {
         const apiKeyEl = container.querySelector('.external-list-apikey');
         const apiKey = apiKeyEl ? apiKeyEl.value : '';
         const enabled = container.querySelector('.external-list-enabled').checked;
+        const intervalEl = container.querySelector('.external-list-interval');
+        const syncInterval = intervalEl ? intervalEl.value : null;
 
         try {
+            const body = { api_key: apiKey, enabled };
+            if (syncInterval) body.sync_interval = parseInt(syncInterval);
             await this.api(`/public-blocklists/${listId}`, {
                 method: 'PUT',
-                body: JSON.stringify({ api_key: apiKey, enabled })
+                body: JSON.stringify(body)
             });
             this.showToast('Configuration saved', 'success');
             this.loadExternalBlocklists();
