@@ -28,14 +28,6 @@ class PublicBlocklistManager:
             'requires_key': True,
             'type': 'api',
         },
-        'crowdsec': {
-            'name': 'CrowdSec',
-            'description': 'Community-driven threat intelligence blocklist',
-            'url': 'https://app.crowdsec.net',
-            'list_url': 'https://raw.githubusercontent.com/crowdsecurity/crowdsec-cloud-blocklists/main/plain_text/crowdsec-ip-blocklist.txt',
-            'requires_key': False,
-            'type': 'url_list',
-        },
         'opendbl': {
             'name': 'OpenDBL',
             'description': 'Open DNS blocklist - broad coverage IP list',
@@ -341,17 +333,6 @@ class PublicBlocklistManager:
 
     # ==================== CrowdSec ====================
 
-    async def sync_crowdsec(self) -> Dict:
-        """Sync with CrowdSec community blocklist (free, no API key needed)"""
-        config = await self.get_config('crowdsec')
-        if not config or not config['enabled']:
-            return {'success': False, 'error': 'CrowdSec not enabled'}
-
-        return await self.sync_url_list(
-            'crowdsec',
-            'https://raw.githubusercontent.com/crowdsecurity/crowdsec-cloud-blocklists/main/plain_text/crowdsec-ip-blocklist.txt',
-            name='CrowdSec'
-        )
 
     # ==================== OpenDBL ====================
 
@@ -605,11 +586,6 @@ class PublicBlocklistManager:
         config = await self.get_config('apiban')
         if config and config['enabled']:
             results['apiban'] = await self.sync_apiban()
-
-        # CrowdSec
-        config = await self.get_config('crowdsec')
-        if config and config['enabled']:
-            results['crowdsec'] = await self.sync_crowdsec()
 
         # OpenDBL
         config = await self.get_config('opendbl')
