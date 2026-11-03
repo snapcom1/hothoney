@@ -112,6 +112,7 @@ class HoneypotAPI:
         self.app.router.add_get('/api/public/blocklist-ipv4.txt', self.public_blocklist_ipv4)
         self.app.router.add_get('/api/public/blocklist-ipv6.txt', self.public_blocklist_ipv6)
         self.app.router.add_get('/api/public/cloudflare.txt', self.public_cloudflare_list)
+        self.app.router.add_get('/api/public/mikrotik.rsc', self.public_mikrotik_rsc)
         self.app.router.add_get('/api/public/juniper-feed', self.public_juniper_feed)
         self.app.router.add_get('/api/public/juniper-prefixlist', self.public_juniper_prefixlist)
         self.app.router.add_get('/api/public/stats', self.public_stats)
@@ -920,6 +921,40 @@ class HoneypotAPI:
         return web.Response(
             text=f"# SIP Honeypot Blocklist (IPv6) - hothoney.snapcom.com\n# Updated: {datetime.utcnow().isoformat()}\n# Count: {len(ipv6)}\n\n{ip_list}\n",
             content_type='text/plain'
+        )
+
+    async def public_mikrotik_rsc(self, request):
+        """MikroTik RouterOS v7 importable .rsc script with :do {} on-error={} wrapper"""
+        list_name = request.query.get('list', 'honeypot')
+        timeout = request.query.get('timeout', '06:00:00')
+
+        ips = await self.blocklist.get_blocked_ips(active_only=True, limit=10000)
+        ipv4, ipv6 = self._split_ips_by_version(ips)
+
+        timeout_str = f' timeout={timeout}' if timeout else ''
+        lines = [
+            "# RouterOS v7 Address-List Import",
+            f"# Generated: {datetime.utcnow().isoformat()}",
+            f"# Total entries: {len(ips)} (IPv4: {len(ipv4)}, IPv6: {len(ipv6)})",
+            "",
+        ]
+
+        if ipv4:
+            lines.append("/ip firewall address-list")
+            for ip in ipv4:
+                lines.append(f':do {{ add list={list_name} address={ip} comment="Honeypot Block"{timeout_str} }} on-error={{}}')
+            lines.append("")
+
+        if ipv6:
+            lines.append("/ipv6 firewall address-list")
+            for ip in ipv6:
+                lines.append(f':do {{ add list={list_name} address={ip} comment="Honeypot Block"{timeout_str} }} on-error={{}}')
+            lines.append("")
+
+        return web.Response(
+            text="\n".join(lines),
+            content_type="text/plain",
+            headers={"Content-Disposition": 'inline; filename="blocklist.rsc"'}
         )
 
     async def public_cloudflare_list(self, request):
