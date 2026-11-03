@@ -199,9 +199,34 @@
                     </div>
                     <div class="card external-lists admin-only" id="external-blocklists-card">
                         <h3>External Blocklist Sources</h3>
-                        <p class="help-text">Import IPs from public threat intelligence feeds like APIBAN.</p>
+                        <p class="help-text">Import IPs from public threat intelligence feeds (APIBAN, CrowdSec, OpenDBL) and custom URL lists.</p>
                         <div id="external-blocklists-container">
                             <!-- Populated by JavaScript -->
+                        </div>
+                        <div class="add-custom-list" style="margin-top: 15px; padding-top: 15px; border-top: 1px solid var(--border-color, #ddd);">
+                            <h4>Add Custom URL List</h4>
+                            <p class="help-text">Add any URL that serves a plain text IP list (one IP/CIDR per line).</p>
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label>Name</label>
+                                    <input type="text" id="custom-list-name" placeholder="e.g. My SIP Blocklist">
+                                </div>
+                                <div class="form-group" style="flex:2">
+                                    <label>URL</label>
+                                    <input type="text" id="custom-list-url" placeholder="https://example.com/blocklist.txt">
+                                </div>
+                            </div>
+                            <div class="form-row">
+                                <div class="form-group" style="flex:2">
+                                    <label>Description (optional)</label>
+                                    <input type="text" id="custom-list-description" placeholder="Brief description">
+                                </div>
+                                <div class="form-group">
+                                    <label>Auth Header (optional)</label>
+                                    <input type="text" id="custom-list-auth" placeholder="Authorization: Bearer xxx">
+                                </div>
+                            </div>
+                            <button class="btn btn-primary" onclick="app.addCustomBlocklist()">Add List</button>
                         </div>
                     </div>
                     <table id="blocklist-table" class="data-table">
@@ -596,6 +621,6 @@
         </div>
     </div>
 
-    <script src="/static/js/app.js?v=16"></script>
+    <script src="/static/js/app.js?v=17"></script>
 </body>
 </html>

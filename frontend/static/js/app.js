@@ -838,6 +838,7 @@ class HoneypotDashboard {
                     <div class="external-list-header">
                         <div class="external-list-info">
                             <strong>${this.escapeHtml(list.name)}</strong>
+                            ${!list.builtin ? '<span class="badge badge-info" style="font-size:10px;margin-left:5px">Custom</span>' : ''}
                             <span class="help-text">${this.escapeHtml(list.description)}</span>
                             <a href="${this.escapeHtml(list.url)}" target="_blank" class="external-link">${this.escapeHtml(list.url)}</a>
                         </div>
@@ -852,12 +853,13 @@ class HoneypotDashboard {
                     </div>
                     <div class="external-list-config">
                         <div class="form-row">
+                            ${list.requires_key || list.builtin ? `
                             <div class="form-group">
                                 <label>API Key ${list.requires_key ? '(required)' : '(optional)'}</label>
                                 <input type="password" class="external-list-apikey"
                                        placeholder="${list.has_key ? '••••••••' : 'Enter API key'}"
                                        data-list-id="${list.list_id}">
-                            </div>
+                            </div>` : ''}
                             <div class="form-group checkbox-group">
                                 <label>
                                     <input type="checkbox" class="external-list-enabled"
@@ -869,8 +871,8 @@ class HoneypotDashboard {
                         </div>
                         <div class="button-group">
                             <button class="btn btn-small" onclick="app.saveExternalBlocklist('${list.list_id}')">Save</button>
-                            <button class="btn btn-small btn-primary" onclick="app.syncExternalBlocklist('${list.list_id}')"
-                                    ${!list.enabled ? 'disabled' : ''}>Sync Now</button>
+                            <button class="btn btn-small btn-primary" onclick="app.syncExternalBlocklist('${list.list_id}')">Sync Now</button>
+                            ${!list.builtin ? `<button class="btn btn-small btn-danger" onclick="app.deleteCustomBlocklist('${list.list_id}')">Delete</button>` : ''}
                         </div>
                         ${list.last_sync
                             ? `<span class="sync-info">Last sync: ${this.formatDate(list.last_sync)}</span>`
@@ -888,7 +890,8 @@ class HoneypotDashboard {
 
     async saveExternalBlocklist(listId) {
         const container = document.querySelector(`[data-list-id="${listId}"]`);
-        const apiKey = container.querySelector('.external-list-apikey').value;
+        const apiKeyEl = container.querySelector('.external-list-apikey');
+        const apiKey = apiKeyEl ? apiKeyEl.value : '';
         const enabled = container.querySelector('.external-list-enabled').checked;
 
         try {
@@ -917,6 +920,45 @@ class HoneypotDashboard {
             } else {
                 this.showToast(result.error || 'Sync failed', 'error');
             }
+        } catch (error) {
+            this.showToast(error.message, 'error');
+        }
+    }
+
+    async addCustomBlocklist() {
+        const name = document.getElementById('custom-list-name').value.trim();
+        const url = document.getElementById('custom-list-url').value.trim();
+        const description = document.getElementById('custom-list-description').value.trim();
+        const auth = document.getElementById('custom-list-auth').value.trim();
+
+        if (!name || !url) {
+            this.showToast('Name and URL are required', 'error');
+            return;
+        }
+
+        try {
+            await this.api('/public-blocklists/custom', {
+                method: 'POST',
+                body: JSON.stringify({ name, url, description, auth_header: auth })
+            });
+            this.showToast(`Added ${name}`, 'success');
+            document.getElementById('custom-list-name').value = '';
+            document.getElementById('custom-list-url').value = '';
+            document.getElementById('custom-list-description').value = '';
+            document.getElementById('custom-list-auth').value = '';
+            this.loadExternalBlocklists();
+        } catch (error) {
+            this.showToast(error.message, 'error');
+        }
+    }
+
+    async deleteCustomBlocklist(listId) {
+        if (!confirm('Delete this custom list and remove all its imported IPs?')) return;
+        try {
+            await this.api(`/public-blocklists/${listId}`, { method: 'DELETE' });
+            this.showToast('List deleted', 'success');
+            this.loadExternalBlocklists();
+            this.loadBlocklist();
         } catch (error) {
             this.showToast(error.message, 'error');
         }

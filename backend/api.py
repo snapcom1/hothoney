@@ -148,10 +148,12 @@ class HoneypotAPI:
         self.app.router.add_put('/api/settings', self.update_settings)
         self.app.router.add_post('/api/settings/test-smtp', self.test_smtp)
 
-        # Public Blocklists (APIBAN, etc)
+        # Public Blocklists (APIBAN, CrowdSec, OpenDBL, custom URLs)
         self.app.router.add_get('/api/public-blocklists', self.get_public_blocklists)
         self.app.router.add_put('/api/public-blocklists/{list_id}', self.update_public_blocklist)
         self.app.router.add_post('/api/public-blocklists/{list_id}/sync', self.sync_public_blocklist)
+        self.app.router.add_post('/api/public-blocklists/custom', self.add_custom_blocklist)
+        self.app.router.add_delete('/api/public-blocklists/{list_id}', self.delete_custom_blocklist)
 
         # Static files (frontend) - use absolute path relative to this file
         base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -1360,6 +1362,16 @@ class HoneypotAPI:
         try:
             if list_id == 'apiban':
                 result = await self.public_blocklist_mgr.sync_apiban()
+            elif list_id == 'crowdsec':
+                result = await self.public_blocklist_mgr.sync_crowdsec()
+            elif list_id == 'opendbl':
+                result = await self.public_blocklist_mgr.sync_opendbl()
+            elif list_id.startswith('custom_'):
+                custom = await self.public_blocklist_mgr._get_custom_list(list_id)
+                if not custom:
+                    return json_response({'error': f'Unknown list: {list_id}'}, status=404)
+                result = await self.public_blocklist_mgr.sync_url_list(
+                    list_id, custom['url'], auth_header=custom.get('auth_header'), name=custom['name'])
             else:
                 return json_response({'error': f'Unknown blocklist: {list_id}'}, status=400)
 
@@ -1369,44 +1381,78 @@ class HoneypotAPI:
             logger.error(f"Sync public blocklist error: {e}")
             return json_response({'error': str(e)}, status=500)
 
+    @auth_required(admin_only=True)
+    async def add_custom_blocklist(self, request):
+        """Add a custom URL blocklist"""
+        try:
+            data = await request.json()
+            name = data.get('name', '').strip()
+            url = data.get('url', '').strip()
+            description = data.get('description', '')
+            auth_header = data.get('auth_header', '')
+
+            if not name or not url:
+                return json_response({'error': 'Name and URL are required'}, status=400)
+            if not url.startswith('http://') and not url.startswith('https://'):
+                return json_response({'error': 'URL must start with http:// or https://'}, status=400)
+
+            result = await self.public_blocklist_mgr.add_custom_list(name, url, description, auth_header)
+            return json_response({'success': True, **result})
+        except ValueError as e:
+            return json_response({'error': str(e)}, status=400)
+        except Exception as e:
+            logger.error(f"Add custom blocklist error: {e}")
+            return json_response({'error': str(e)}, status=500)
+
+    @auth_required(admin_only=True)
+    async def delete_custom_blocklist(self, request):
+        """Delete a custom URL blocklist"""
+        list_id = request.match_info['list_id']
+        try:
+            if not list_id.startswith('custom_'):
+                return json_response({'error': 'Cannot delete built-in blocklists'}, status=400)
+            result = await self.public_blocklist_mgr.remove_custom_list(list_id)
+            status = 200 if result.get('success') else 400
+            return json_response(result, status=status)
+        except Exception as e:
+            logger.error(f"Delete custom blocklist error: {e}")
+            return json_response({'error': str(e)}, status=500)
+
     async def auto_sync_blocklists(self):
-        """Background task to auto-sync public blocklists every 5 minutes"""
-        # Wait a bit before first sync to let everything initialize
+        """Background task to auto-sync all public blocklists every 5 minutes"""
         await asyncio.sleep(30)
 
         sync_count = 0
         while True:
             try:
-                # Check if APIBAN is enabled
-                config = await self.public_blocklist_mgr.get_config('apiban')
-                if config and config.get('enabled') and config.get('api_key'):
-                    # Sync new IPs
-                    logger.info("Auto-sync: Starting APIBAN sync...")
-                    result = await self.public_blocklist_mgr.sync_apiban()
+                # Sync all enabled lists
+                results = await self.public_blocklist_mgr.sync_all()
+                for list_id, result in results.items():
                     if result.get('success'):
-                        logger.info(f"Auto-sync: APIBAN sync complete - {result.get('imported', 0)} new IPs")
+                        imported = result.get('imported', 0)
+                        if imported > 0:
+                            logger.info(f"Auto-sync: {list_id} - {imported} new IPs")
                     else:
-                        logger.warning(f"Auto-sync: APIBAN sync failed - {result.get('error', 'Unknown error')}")
+                        logger.warning(f"Auto-sync: {list_id} failed - {result.get('error', 'Unknown')}")
 
-                    # Run cleanup every 12 syncs (once per hour at 5-min intervals)
-                    sync_count += 1
-                    if sync_count >= 12:
-                        sync_count = 0
-                        logger.info("Auto-sync: Starting APIBAN cleanup (removing delisted IPs)...")
+                # Hourly tasks: APIBAN cleanup + purge old entries
+                sync_count += 1
+                if sync_count >= 12:
+                    sync_count = 0
+
+                    config = await self.public_blocklist_mgr.get_config('apiban')
+                    if config and config.get('enabled') and config.get('api_key'):
+                        logger.info("Auto-sync: Starting APIBAN cleanup...")
                         cleanup_result = await self.public_blocklist_mgr.cleanup_apiban()
                         if cleanup_result.get('success'):
-                            logger.info(f"Auto-sync: APIBAN cleanup complete - {cleanup_result.get('removed', 0)} removed")
-                        else:
-                            logger.warning(f"Auto-sync: APIBAN cleanup failed - {cleanup_result.get('error', 'Unknown error')}")
+                            logger.info(f"Auto-sync: APIBAN cleanup - {cleanup_result.get('removed', 0)} removed")
 
-                        # Purge entries older than 90 days
-                        purge_result = await self.public_blocklist_mgr.purge_old_entries(max_age_days=90)
-                        if purge_result.get('success') and purge_result.get('purged', 0) > 0:
-                            logger.info(f"Auto-sync: Purged {purge_result['purged']} public blocklist entries older than 90 days")
+                    purge_result = await self.public_blocklist_mgr.purge_old_entries(max_age_days=90)
+                    if purge_result.get('success') and purge_result.get('purged', 0) > 0:
+                        logger.info(f"Auto-sync: Purged {purge_result['purged']} entries older than 90 days")
             except Exception as e:
                 logger.error(f"Auto-sync error: {e}")
 
-            # Wait 5 minutes before next sync
             await asyncio.sleep(300)
 
     # Frontend serving
