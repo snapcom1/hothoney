@@ -757,7 +757,7 @@ class HoneypotAPI:
         prefix_name = request.query.get('prefix_name', 'HONEYPOT-BLOCKLIST')
         filter_name = request.query.get('filter_name', 'HONEYPOT-BLOCK')
 
-        ips = await self.blocklist.get_blocked_ips(active_only=True, limit=10000)
+        ips = await self.blocklist.get_blocked_ips(active_only=True, limit=100000)
 
         try:
             output = export_blocklist(ips, format_type, prefix_name, filter_name)
@@ -777,7 +777,7 @@ class HoneypotAPI:
         prefix_name = request.query.get('prefix_name', 'HONEYPOT-BLOCKLIST')
         filter_name = request.query.get('filter_name', 'HONEYPOT-BLOCK')
 
-        ips = await self.blocklist.get_blocked_ips(active_only=True, limit=10000)
+        ips = await self.blocklist.get_blocked_ips(active_only=True, limit=100000)
         output = export_blocklist(ips, format_type, prefix_name, filter_name)
 
         # Determine filename and content type
@@ -867,7 +867,7 @@ class HoneypotAPI:
             return json_response({'error': 'Failed to delete user'}, status=404)
 
     # Public endpoints (no auth required)
-    async def _get_all_blocked_ips(self, limit=10000):
+    async def _get_all_blocked_ips(self, limit=100000):
         """Get combined internal blocklist + external public blocklist IPs (deduplicated)"""
         internal = await self.blocklist.get_blocked_ips(active_only=True, limit=limit)
         internal_set = {ip['ip_address'] for ip in internal}
