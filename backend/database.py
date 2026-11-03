@@ -293,6 +293,25 @@ class BlocklistManager:
         """Get list of blocked IPs (excludes expired IPs based on settings)"""
         expiry_days = await self._get_expiry_days()
         async with self.db.get_cursor() as cursor:
+            params = []
+
+            if source_filter == 'external':
+                # IPs only in external lists, not in internal blocklist
+                query = """
+                    SELECT p.ip_address, p.list_id as added_by, p.imported_at as last_seen,
+                           p.imported_at as created_at, 1 as active, 0 as hit_count,
+                           CONCAT('External: ', p.list_id) as reason, 1 as in_external
+                    FROM public_blocklist_ips p
+                    WHERE NOT EXISTS (SELECT 1 FROM blocked_ips b WHERE b.ip_address = p.ip_address AND b.active = TRUE)
+                """
+                if search:
+                    query += " AND p.ip_address LIKE %s"
+                    params.append(f"%{search}%")
+                query += " GROUP BY p.ip_address ORDER BY p.imported_at DESC LIMIT %s OFFSET %s"
+                params.extend([limit, offset])
+                await cursor.execute(query, params)
+                return await cursor.fetchall()
+
             query = """
                 SELECT b.*,
                        EXISTS(SELECT 1 FROM public_blocklist_ips p
@@ -300,13 +319,9 @@ class BlocklistManager:
                 FROM blocked_ips b
             """
             conditions = []
-            params = []
             if active_only:
                 conditions.append(f"b.active = TRUE AND b.last_seen >= DATE_SUB(NOW(), INTERVAL {expiry_days} DAY)")
-            if source_filter == 'external':
-                conditions.append("""EXISTS (SELECT 1 FROM public_blocklist_ips p
-                    WHERE p.ip_address = b.ip_address)""")
-            elif source_filter == 'internal':
+            if source_filter == 'internal':
                 conditions.append("""NOT EXISTS (SELECT 1 FROM public_blocklist_ips p
                     WHERE p.ip_address = b.ip_address)""")
             elif source_filter == 'both':
@@ -327,15 +342,23 @@ class BlocklistManager:
         """Get count of blocked IPs (excludes expired IPs based on settings)"""
         expiry_days = await self._get_expiry_days()
         async with self.db.get_cursor() as cursor:
+            params = []
+
+            if source_filter == 'external':
+                query = """SELECT COUNT(DISTINCT p.ip_address) as count FROM public_blocklist_ips p
+                    WHERE NOT EXISTS (SELECT 1 FROM blocked_ips b WHERE b.ip_address = p.ip_address AND b.active = TRUE)"""
+                if search:
+                    query += " AND p.ip_address LIKE %s"
+                    params.append(f"%{search}%")
+                await cursor.execute(query, params if params else None)
+                result = await cursor.fetchone()
+                return result['count']
+
             query = "SELECT COUNT(*) as count FROM blocked_ips"
             conditions = []
-            params = []
             if active_only:
                 conditions.append(f"active = TRUE AND last_seen >= DATE_SUB(NOW(), INTERVAL {expiry_days} DAY)")
-            if source_filter == 'external':
-                conditions.append("""EXISTS (SELECT 1 FROM public_blocklist_ips p
-                    WHERE p.ip_address = blocked_ips.ip_address)""")
-            elif source_filter == 'internal':
+            if source_filter == 'internal':
                 conditions.append("""NOT EXISTS (SELECT 1 FROM public_blocklist_ips p
                     WHERE p.ip_address = blocked_ips.ip_address)""")
             elif source_filter == 'both':
