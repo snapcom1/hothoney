@@ -589,6 +589,18 @@ class HoneypotLogger:
         expiry_days = await self._get_expiry_days()
         credentials = event.get('credentials', {})
 
+        # Ignore SIP responses (1xx-6xx) — these are reflections from DDoS mitigation
+        if method and method[:1].isdigit():
+            return
+
+        # Ignore DDoS mitigation challenges: OPTIONS with username "1" and no auth response
+        # These are challenge probes from mitigation infrastructure (spoofed source IPs)
+        if method == 'OPTIONS' and credentials:
+            username = credentials.get('username', '')
+            response = credentials.get('response')
+            if username in ('1', '') and not response:
+                return
+
         # Check credential rate limiting - block if too many credential attempts in window
         if credentials and (credentials.get('username') or credentials.get('auth_user')):
             if self._check_credential_ratelimit(ip):
@@ -597,14 +609,8 @@ class HoneypotLogger:
                 reason = f"Credential brute force: {attempts} attempts in {window_secs} seconds ({expiry_days} day block)"
                 await self.blocklist.add_ip(ip, reason=reason, auto=True)
                 logger.warning(f"CREDENTIAL RATELIMIT BLOCK - {ip}: {attempts} credential attempts in {window_secs}s")
-                # Send automatic abuse report
                 await self._send_abuse_report(ip)
                 return
-
-        # Ignore SIP responses (1xx-6xx) — these are reflections from DDoS mitigation
-        if method and method[:1].isdigit():
-            logger.debug(f"Ignoring SIP response {method} from {ip} (likely reflection/mitigation)")
-            return
 
         # SIP traffic with clear attack intent — instant block
         if method in self.SIP_INSTANT_BLOCK:
