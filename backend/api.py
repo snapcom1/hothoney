@@ -593,8 +593,8 @@ class HoneypotAPI:
 
         # Convert datetime objects to strings
         for ip in ips:
-            for key in ['first_seen', 'last_seen']:
-                if ip.get(key) and isinstance(ip[key], datetime):
+            for key in ip:
+                if isinstance(ip[key], datetime):
                     ip[key] = ip[key].isoformat()
 
         return json_response({
