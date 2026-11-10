@@ -721,13 +721,26 @@ class SIPProtocol(asyncio.DatagramProtocol):
             logger.warning(f"Invalid SIP message from {source_ip}:{source_port}")
             return
 
-        # Drop packets from blocked IPs immediately
+        # For blocked IPs: still tarpit (waste their time) but limit to 1 session per IP
+        # and skip logging/credential extraction to avoid event loop overload
+        is_blocked = False
         if self.honeypot.is_blocked_callback:
             try:
-                if await self.honeypot.is_blocked_callback(source_ip):
-                    return
+                is_blocked = await self.honeypot.is_blocked_callback(source_ip)
             except Exception:
                 pass
+
+        if is_blocked:
+            call_id = msg.headers.get('call-id', '')
+            if msg.method == 'INVITE' and await self.honeypot.should_tarpit(source_ip):
+                # Only allow one tarpit per blocked IP
+                active_for_ip = sum(1 for cid, info in self.tarpit_session_info.items()
+                                    if info.get('ip') == source_ip
+                                    and cid in self.tarpit_sessions)
+                if active_for_ip < 1:
+                    task = asyncio.create_task(self._run_tarpit(msg, addr, call_id))
+                    self.tarpit_sessions[call_id] = task
+            return
 
         logger.info(f"SIP {msg.method} from {source_ip}:{source_port}")
 
