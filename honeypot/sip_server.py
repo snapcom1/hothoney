@@ -733,11 +733,7 @@ class SIPProtocol(asyncio.DatagramProtocol):
         if is_blocked:
             call_id = msg.headers.get('call-id', '')
             if msg.method == 'INVITE' and await self.honeypot.should_tarpit(source_ip):
-                # Only allow one tarpit per blocked IP
-                active_for_ip = sum(1 for cid, info in self.tarpit_session_info.items()
-                                    if info.get('ip') == source_ip
-                                    and cid in self.tarpit_sessions)
-                if active_for_ip < 1:
+                if call_id not in self.tarpit_sessions:
                     task = asyncio.create_task(self._run_tarpit(msg, addr, call_id))
                     self.tarpit_sessions[call_id] = task
             return
