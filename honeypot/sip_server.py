@@ -721,6 +721,14 @@ class SIPProtocol(asyncio.DatagramProtocol):
             logger.warning(f"Invalid SIP message from {source_ip}:{source_port}")
             return
 
+        # Drop packets from blocked IPs immediately
+        if self.honeypot.is_blocked_callback:
+            try:
+                if await self.honeypot.is_blocked_callback(source_ip):
+                    return
+            except Exception:
+                pass
+
         logger.info(f"SIP {msg.method} from {source_ip}:{source_port}")
 
         # Extract any credentials
